@@ -307,6 +307,50 @@ const v3 = c => `vec3(${c.r.toFixed(5)},${c.g.toFixed(5)},${c.b.toFixed(5)})`;
 const C = {}; for (const k in LIN) C[k] = v3(LIN[k]);
 
 
+/*───────────────────────── §0c  THE SCENE CONTRACT ──────────────────────────*/
+/*  Whether a mesh casts a shadow is decided by collectShadowSet() (§15) from
+    exactly one fact: does it carry a `userData.depth` material?  If so, the
+    shadow pass re-draws it with that material; if not, the mesh is hidden for
+    the duration of the pass.  Nothing else is consulted.
+
+    That makes an omission SILENT.  Forget the depth material on a new building
+    and it quietly stops casting — and under a 13.5° sun, where the shadow
+    carries most of the form, a missing shadow reads as a lighting bug rather
+    than as a missing property, so you go looking in the wrong place entirely.
+
+    Meshes are therefore never handed to `scene.add` directly.  addMesh() takes
+    the shadow behaviour as a REQUIRED argument and NO_CAST is a value you have
+    to type, so the decision cannot be skipped — only made, one way or another. */
+
+const NO_CAST = Symbol('no shadow');
+
+function addMesh(parent, obj, depth){
+  if(depth === undefined) throw new Error(
+    `addMesh(${obj.name || obj.type}): pass a depth material or NO_CAST. `+
+    `A mesh with neither casts no shadow, and says nothing about it — §0c.`);
+  if(depth !== NO_CAST) obj.userData.depth = depth;
+  parent.add(obj);
+  return obj;
+}
+
+/*  Bulk containers — the grass field, the particle systems — are hidden
+    wholesale by a single flag rather than walked mesh by mesh, so their
+    children never reach the test above and declare nothing individually.     */
+function addBulk(parent, group){
+  group.userData.bulk = true;
+  parent.add(group);
+  return group;
+}
+
+/*  For a rig that assembles its own meshes internally and wants one depth
+    material across all of them — the locomotive — the declaration is made in
+    a single sweep after construction rather than at each internal .add().    */
+function setDepth(root, mat){
+  root.traverse(o=>{ if(o.isMesh) o.userData.depth = mat; });
+  return root;
+}
+
+
 /*─────────────────────────────── §1  MATH / NOISE ───────────────────────────*/
 
 const TAU = Math.PI * 2, DEG = Math.PI / 180;
@@ -2254,8 +2298,7 @@ class GrassField {
     // and pushing a save-record for each of them, twice, every frame.
     this.group = new THREE.Group();
     this.group.matrixAutoUpdate = false;
-    this.group.userData.bulk = true;
-    scene.add(this.group);
+    addBulk(scene, this.group);
     this.rings = [];
     this.built = false;
     this.quality = quality;
@@ -4024,6 +4067,8 @@ class Train {
       }
       this.cars.push(g); this.group.add(g);
     }
+    // a plain container: collectShadowSet walks straight through it to the
+    // meshes, which are given their depth material by setDepth() in boot (§0c)
     scene.add(this.group);
 
     this.s = -1e9; this.active=false; this.theta=0; this.lastChuff=0; this.chuffCount=0;
@@ -4120,7 +4165,8 @@ class Particles {
     }, TRANSP));
     this.mesh=new THREE.Mesh(g,this.mat);
     this.mesh.frustumCulled=false; this.mesh.renderOrder=order||20;
-    scene.add(this.mesh);
+    // parented into lifeGroup, which is bulk — this never reaches the test
+    addMesh(scene, this.mesh, NO_CAST);
     this.free=[]; for(let i=max-1;i>=0;i--) this.free.push(i);
   }
   spawn(o){
@@ -5158,8 +5204,8 @@ async function boot(){
       all of it painted over by the valley.                                    */
   skyMesh = new THREE.Mesh(new THREE.BoxGeometry(2,2,2),
     RSM(SKY_VS, SKY_FS(), U(), {side:THREE.BackSide, depthWrite:false, depthTest:true}));
-  skyMesh.frustumCulled=false; skyMesh.renderOrder=9; scene.add(skyMesh);
-  skyMesh.userData.noCast=true;
+  skyMesh.frustumCulled=false; skyMesh.renderOrder=9;
+  addMesh(scene, skyMesh, NO_CAST);
 
   /*── distant ridges ──*/
   setStat('raising the far hills', 0.46); await idle();
@@ -5176,8 +5222,8 @@ async function boot(){
         uFarCol:{value:new THREE.Vector3(d.far.r,d.far.g,d.far.b)},
         uMix:{value:d.mix}, uBaseY:{value:d.y},
       }), {side:THREE.DoubleSide}));
-    m.frustumCulled=false; m.renderOrder=-500; m.userData.noCast=true;
-    scene.add(m); ridges.push(m);
+    m.frustumCulled=false; m.renderOrder=-500;
+    addMesh(scene, m, NO_CAST); ridges.push(m);
   }
 
   /*── terrain ──*/
@@ -5188,7 +5234,10 @@ async function boot(){
   const tGeo = buildTerrainGeometry(320, 1190, 1.62, CFG.spawn.x, CFG.spawn.z);
   terrainMesh = new THREE.Mesh(tGeo, RSM(TERRAIN_VS(), TERRAIN_FS(), U()));
   terrainMesh.frustumCulled=false; terrainMesh.renderOrder=1;
-  scene.add(terrainMesh);
+  // NO_CAST is not an oversight: the clipmap is warped around the camera, so
+  // its triangles slide as you walk and its shadow would crawl.  proxyTerrain
+  // below is the fixed-grid stand-in that casts on its behalf.
+  addMesh(scene, terrainMesh, NO_CAST);
   // the coarse stand-in that the shadow and reflection passes use instead
   // 192 divisions over ±288 m is an exact 3 m cell, which is what uProxyC is
   // snapped to — a proxy grid that slides against the terrain under it makes
@@ -5198,10 +5247,9 @@ async function boot(){
   proxyTerrain.frustumCulled = false; proxyTerrain.visible = false;
   proxyTerrain.renderOrder = 1;
   proxyTerrain.userData.proxy = true;
-  proxyTerrain.userData.depth = DSM(PROXY_TERRAIN_VS(),
-    U({ uProxyDrop:{value:1.05} }), {side:THREE.DoubleSide});
   proxyTerrain.userData.beauty = proxyTerrain.material;
-  scene.add(proxyTerrain);
+  addMesh(scene, proxyTerrain, DSM(PROXY_TERRAIN_VS(),
+    U({ uProxyDrop:{value:1.05} }), {side:THREE.DoubleSide}));
 
   /*── river ──*/
   const piers = pierCentres().map(pc=>{
@@ -5215,16 +5263,17 @@ async function boot(){
       uReflect:{value:null}, uReflectOn:{value:0}, uReflectPlane:{value:BR.water},
       uPiers:{value:piers}, uPierN:{value:pierN},
     }), {side:THREE.DoubleSide}));
-  waterMesh.frustumCulled=false; waterMesh.renderOrder=3; waterMesh.userData.noCast=true;
-  scene.add(waterMesh);
+  waterMesh.frustumCulled=false; waterMesh.renderOrder=3;
+  addMesh(scene, waterMesh, NO_CAST);
 
   /*── clouds ──*/
   setStat('stacking the cumulus', 0.56); await idle();
   cloudObj = buildClouds();
   const cloudMesh = new THREE.Mesh(cloudObj.geom,
     RSM(CLOUD_VS(), CLOUD_FS(), U(), Object.assign({side:THREE.DoubleSide, depthTest:true}, TRANSP)));
-  cloudMesh.frustumCulled=false; cloudMesh.renderOrder=10; cloudMesh.userData.noCast=true;
-  scene.add(cloudMesh);
+  cloudMesh.frustumCulled=false; cloudMesh.renderOrder=10;
+  // the cumulus cast through the baked coverage map (§4), not the shadow pass
+  addMesh(scene, cloudMesh, NO_CAST);
   cloudObj.mesh = cloudMesh;
 
   /*── viaduct ──*/
@@ -5232,8 +5281,8 @@ async function boot(){
   const coreMat = RSM(SOLID_VS(), SOLID_FS(C.mortar, `mix(${C.mortar},${C.sShade},0.5)`, C.sDeep), U(), {side:THREE.DoubleSide});
   const core = new THREE.Mesh(buildBridgeCore(), coreMat);
   core.frustumCulled=true; core.renderOrder=2;
-  core.userData.depth = DSM(SOLID_VS(), U(), {side:THREE.DoubleSide});
-  scene.add(core); reflectSet.push(core);
+  addMesh(scene, core, DSM(SOLID_VS(), U(), {side:THREE.DoubleSide}));
+  reflectSet.push(core);
 
   const stoneList = buildBridgeStones();
   const sGeo = roundedBoxGeometry(0.30);
@@ -5250,14 +5299,14 @@ async function boot(){
                        uPp:{value:new THREE.Vector2(BR.pp[0],BR.pp[1])} });
   const stones = new THREE.Mesh(sGeo, RSM(STONE_VS(), STONE_FS(), stoneUni, {side:THREE.DoubleSide}));
   stones.frustumCulled=true; stones.renderOrder=2;
-  stones.userData.depth = DSM(STONE_VS(), stoneUni, {side:THREE.DoubleSide});
-  scene.add(stones); reflectSet.push(stones);
+  addMesh(scene, stones, DSM(STONE_VS(), stoneUni, {side:THREE.DoubleSide}));
+  reflectSet.push(stones);
 
   const way = new THREE.Mesh(buildPermanentWay(),
     RSM(SOLID_VS(), SOLID_FS(C.sB, `mix(${C.sShade},${C.pathShade},0.4)`, C.sDeep), U(), {side:THREE.DoubleSide}));
   way.frustumCulled=false; way.renderOrder=2;
-  way.userData.depth = DSM(SOLID_VS(), U(), {side:THREE.DoubleSide});
-  scene.add(way); reflectSet.push(way);
+  addMesh(scene, way, DSM(SOLID_VS(), U(), {side:THREE.DoubleSide}));
+  reflectSet.push(way);
 
   /*── village ──*/
   setStat('lighting the village', 0.68); await idle();
@@ -5266,13 +5315,13 @@ async function boot(){
   const paintedMat = RSM(PAINTED_VS(), PAINTED_FS(), U(), {side:THREE.DoubleSide});
   const vMesh = new THREE.Mesh(vil.geom, paintedMat);
   vMesh.frustumCulled=true; vMesh.renderOrder=2;
-  vMesh.userData.depth = DSM(PAINTED_VS(), U(), {side:THREE.DoubleSide});
-  scene.add(vMesh);
+  const paintedDepth = DSM(PAINTED_VS(), U(), {side:THREE.DoubleSide});
+  addMesh(scene, vMesh, paintedDepth);
   millWheel = new THREE.Mesh(buildMillWheel(vil.mill), paintedMat);
   millWheel.position.set(vil.mill.x, vil.mill.y, vil.mill.z);
   millWheel.rotation.y = vil.mill.yaw;
-  millWheel.frustumCulled=true; millWheel.userData.depth = vMesh.userData.depth;
-  scene.add(millWheel);
+  millWheel.frustumCulled=true;
+  addMesh(scene, millWheel, paintedDepth);   // shares the village's depth pass
 
   /*── trees ──*/
   setStat('planting the woods', 0.74); await idle();
@@ -5306,23 +5355,22 @@ async function boot(){
                      uCullR:{value:CFG.shadowSpan*0.76} });
     const m = new THREE.Mesh(geom, RSM(TREE_VS(), TREE_FS(), uni, {side:THREE.DoubleSide}));
     m.frustumCulled=false; m.renderOrder=2;
-    m.userData.depth = DSM(TREE_VS(), dUni, {side:THREE.DoubleSide});
-    scene.add(m); trees.push(m);
+    addMesh(scene, m, DSM(TREE_VS(), dUni, {side:THREE.DoubleSide}));
+    trees.push(m);
     if(detail>0) reflectSet.push(m);
   }
 
   /*── train ──*/
   setStat('raising steam', 0.82); await idle();
   train = new Train(scene, U());
-  const trainDepth = DSM(PAINTED_VS(), U(), {side:THREE.DoubleSide});
-  train.group.traverse(o=>{ if(o.isMesh) o.userData.depth = trainDepth; });
+  setDepth(train.group, DSM(PAINTED_VS(), U(), {side:THREE.DoubleSide}));
   reflectSet.push(train.group);
 
   /*── particles ──*/
   // one container, so the shadow and reflection passes skip all of them with a
   // single flag rather than a save-record per mesh per pass
-  lifeGroup = new THREE.Group(); lifeGroup.userData.bulk = true;
-  scene.add(lifeGroup);
+  lifeGroup = new THREE.Group();
+  addBulk(scene, lifeGroup);
   smoke  = new Particles(lifeGroup, U(), 520,  SMOKE_FS(), 22, true);
   motes  = new Particles(lifeGroup, U(), 2400, MOTE_FS(),  24, false);
   birdsP = new Particles(lifeGroup, U(), 60,   BIRD_FS(),  21, false);
@@ -5344,7 +5392,6 @@ async function boot(){
   setStat('sowing a million blades', 0.88); await idle();
   grass = new GrassField(scene, G, QUALITY[State.q]);
   grass.build(QUALITY[State.q]);
-  for(const ring of grass.rings) for(const m of ring.meshes) m.userData.noCast = true;
 
   /*── camera / rig ──*/
   walker = new Walker(camera);
@@ -5652,6 +5699,8 @@ function emitVillageSmoke(dt){
     flag instead of being walked at all.                                      */
 const _swObj=[], _swMat=[], _swVis=[]; let _swN=0;
 const _bulk=[];
+/*  The three-way branch below is the whole of the cast/no-cast rule, and §0c is
+    the contract that keeps every mesh honest about which arm it lands in.    */
 function collectShadowSet(o){
   if(o.userData.bulk){ _bulk.push([o, o.visible]); o.visible = false; return; }
   if(o.isMesh){
@@ -6019,7 +6068,6 @@ function setQuality(q){
 function rebuildGrass(){
   grass.build(QUALITY[State.q]);
   grass.setAngular(ANG_PER_PX);
-  for(const r of grass.rings) for(const m of r.meshes) m.userData.noCast=true;
 }
 function autoQuality(){
   if(!State.autoQ) return;
