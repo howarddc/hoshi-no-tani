@@ -264,6 +264,11 @@ const RINGS = [
   { chunk:250,  blades: 231000, near:260,  far:1250, dn:260, wpx:4.00, hs:1.95 }, //  3.7/m²
 ];
 
+// Derived world dimensions. They live here rather than in terrain.js so that
+// field.js can reach them without importing the terrain, which would make
+// terrain -> field -> terrain a cycle.
+const HM = CFG.hmRes, WS = CFG.world, HALF = WS/2;
+
 /* ═══ src/modules/palette.js ════════════════════════════════════════════════════ */
 /*──────────────────────────────── §0b PALETTE ────────────────────────────────*/
 // Every colour in the film, in one place.  sRGB hex -> linear at load.
@@ -411,33 +416,7 @@ function billow(x,y,oct=4,lac=2.0,gain=0.5){
   return (s/n)*2-1;
 }
 
-/* ═══ src/modules/main.js ═══════════════════════════════════════════════════════ */
-/*═══════════════════════════════════════════════════════════════════════════════
-  HOSHI-NO-TANI  ·  a procedural Ghibli valley
-  ─────────────────────────────────────────────────────────────────────────────
-  Extracted so far, and imported above:
-      config.js    §0   world constants, quality presets, grass rings
-      palette.js   §0b  every colour in the film, sRGB -> linear
-      scene-contract.js §0c  addMesh / addBulk / setDepth — READ THIS FIRST
-      math.js      §1   noise, fbm, deterministic PRNG
-
-  Still in this file, and next to be carved out:
-      §2  glsl library              §9  village + viaduct
-      §3  terrain                   §10 train + smoke
-      §4  sky + clouds              §12 shadow pass + post chain
-      §5  wind field                §13 camera & gait
-      §6  grass                     §14 audio engine
-      §7  river                     §15 boot + main loop
-      §8  trees
-
-  (There is no §11.  The original table of contents advertised one, listing
-   pollen, birds and butterflies; the particles live at the end of §10, the
-   mote and bird logic sits in §15, and there are no butterflies anywhere.)
-
-  The error handler that used to open this file now lives in index.html as a
-  classic script, so it is registered before any module evaluates.
-═══════════════════════════════════════════════════════════════════════════════*/
-
+/* ═══ src/modules/glsl.js ═══════════════════════════════════════════════════════ */
 /*───────────────────────────── §2  GLSL LIBRARY ────────────────────────────*/
 // Shared chunks injected into every shader.  One physics, one palette, one sky.
 
@@ -827,13 +806,123 @@ float windProfile(float z){
 }
 `;
 
+/* ═══ src/modules/materials.js ══════════════════════════════════════════════════ */
+/*  The shared uniform block and the material factories.
+    G holds the uniform OBJECTS that every shader shares; U() returns a
+    shallow copy, so all materials keep pointing at the same objects and a
+    single write to G.uTime.value updates every one of them at once.  A
+    material needing its own value for a uniform must be given its own
+    object — see the uni/dUni pair in the tree setup.
 
+    These live outside main.js because train.js builds materials during its
+    own construction, and main.js is the entry: nothing can import from it. */
+
+const SUN = (()=>{
+  const el=CFG.sunElev*DEG, az=CFG.sunAzim*DEG;
+  return new THREE.Vector3(Math.sin(az)*Math.cos(el), Math.sin(el), Math.cos(az)*Math.cos(el)).normalize();
+})();
+
+const G = {
+  uTime:        { value:0 },
+  uSunDir:      { value:SUN.clone() },
+  uCamPos:      { value:new THREE.Vector3() },
+  uWindOrigin:  { value:new THREE.Vector2() },
+  uCloudDrift:  { value:new THREE.Vector2() },
+  uMeanWind:    { value:new THREE.Vector2(3,1) },
+  uWindTex:     { value:null },
+  uHeight:      { value:null },
+  uSplat:       { value:null },
+  uMeadow:      { value:null },
+  uShadowMap:   { value:null },
+  uCloudSh:     { value:null },
+  uCloudShOrigin:{ value:new THREE.Vector2() },
+  uLightMat:    { value:new THREE.Matrix4() },
+  uShadowTexel: { value:1/2048 },
+  uPuff:        { value:null },
+  uProxyC:      { value:new THREE.Vector2() },
+  uShadowC:     { value:new THREE.Vector2() },
+  uCull:        { value:new THREE.Vector4(0,0,-1.1,0) },
+  uWindLag:     { value:new THREE.Vector2() },
+  uCloudAmount: { value:1.0 },
+  uFogMul:      { value:1.0 },
+};
+const U = extra => Object.assign({}, G, extra||{});
+const RSM = (vs, fs, uni, opt)=> new THREE.RawShaderMaterial(Object.assign({
+  vertexShader: VHEAD + vs, fragmentShader: FHEAD + fs,
+  uniforms: uni, glslVersion: THREE.GLSL3,
+}, opt||{}));
+const TRANSP = {
+  transparent:true, depthWrite:false, blending:THREE.CustomBlending,
+  blendSrc:THREE.SrcAlphaFactor, blendDst:THREE.OneMinusSrcAlphaFactor,
+  blendEquation:THREE.AddEquation,
+  blendSrcAlpha:THREE.ZeroFactor, blendDstAlpha:THREE.OneFactor,
+  blendEquationAlpha:THREE.AddEquation,
+};
+
+/* ═══ src/modules/field.js ══════════════════════════════════════════════════════ */
+/*  Generic 2-D distance field, shared by the river, the track and the path.
+    Lives in its own module because the terrain needs it while building the
+    splat map, and importing it from the viaduct made terrain -> viaduct ->
+    terrain a cycle: real ES modules then evaluated the viaduct's top-level
+    IIFE before the terrain had initialised BRIDGE.                        */
+
+/*──────────── generic distance field (reused by river, track, path) ────────*/
+function makeDF(points, res){
+  res = res||384;
+  const cell = WS/res;
+  const dist = new Float32Array(res*res).fill(1e9);
+  const par  = new Float32Array(res*res);
+  const sx = new Int16Array(res*res).fill(-9999), sy = new Int16Array(res*res).fill(-9999);
+  for(const p of points){
+    const gx=Math.round((p.x+HALF)/cell), gy=Math.round((p.z+HALF)/cell);
+    if(gx<0||gy<0||gx>=res||gy>=res) continue;
+    const i=gy*res+gx;
+    if(dist[i]>0){ dist[i]=0; sx[i]=gx; sy[i]=gy; par[i]=p.t; }
+  }
+  const relax=(i,j)=>{ if(sx[j]===-9999) return;
+    const gx=i%res, gy=(i/res)|0;
+    const d=(sx[j]-gx)*(sx[j]-gx)+(sy[j]-gy)*(sy[j]-gy);
+    if(d<dist[i]){ dist[i]=d; sx[i]=sx[j]; sy[i]=sy[j]; par[i]=par[j]; } };
+  for(let it=0; it<2; it++){
+    for(let y=0;y<res;y++) for(let x=0;x<res;x++){ const i=y*res+x;
+      if(x>0) relax(i,i-1); if(y>0) relax(i,i-res);
+      if(x>0&&y>0) relax(i,i-res-1); if(x<res-1&&y>0) relax(i,i-res+1); }
+    for(let y=res-1;y>=0;y--) for(let x=res-1;x>=0;x--){ const i=y*res+x;
+      if(x<res-1) relax(i,i+1); if(y<res-1) relax(i,i+res);
+      if(x<res-1&&y<res-1) relax(i,i+res+1); if(x>0&&y<res-1) relax(i,i+res-1); }
+  }
+  for(let i=0;i<res*res;i++) dist[i]=Math.sqrt(dist[i])*cell;
+  return (x,z)=>{
+    const fx=clamp((x+HALF)/cell,0,res-1.001), fy=clamp((z+HALF)/cell,0,res-1.001);
+    const x0=fx|0,y0=fy|0,tx=fx-x0,ty=fy-y0, i=y0*res+x0;
+    return { d: lerp(lerp(dist[i],dist[i+1],tx), lerp(dist[i+res],dist[i+res+1],tx), ty),
+             t: lerp(lerp(par[i],par[i+1],tx),  lerp(par[i+res],par[i+res+1],tx),  ty) };
+  };
+}
+
+/* ═══ src/modules/track-ref.js ══════════════════════════════════════════════════ */
+/*  The railway's solved geometry, published where both the terrain and the
+    railway can reach it.
+
+    The terrain reads TRACK while baking the splat map and carving the track
+    bed; the railway produces it in buildTrack().  Holding it in railway.js made
+    terrain -> railway -> viaduct -> terrain a cycle, which real ES modules
+    resolve by evaluating the viaduct first — before the terrain has
+    initialised BRIDGE.  A leaf module owning the slot breaks that.
+
+    An importer cannot assign to an imported binding, so the owner exports a
+    setter.  Importers see the live binding, i.e. they observe the new value
+    after setTrack() runs; every read happens during boot, well after.        */
+
+let TRACK = null;
+function setTrack(t){ TRACK = t; return TRACK; }
+
+/* ═══ src/modules/terrain.js ════════════════════════════════════════════════════ */
 /*──────────────────────────────── §3  TERRAIN ───────────────────────────────*/
 /* One heightmap is the single source of truth for the CPU and the GPU alike:
    the mesh, the grass roots, the camera's feet and the wind's terrain coupling
    all read the same 1280² float texture.  Nothing can ever disagree.          */
 
-const HM = CFG.hmRes, WS = CFG.world, HALF = WS/2;
 const heightData = new Float32Array(HM*HM);
 const splatData  = new Uint8Array(CFG.dataRes*CFG.dataRes*4);
 /*  The meadow field: everything the grass vertex shader needs to know about a
@@ -1427,7 +1516,7 @@ void main(){
   outColor = vec4(SAFE3(col), 0.88);
 }`;
 
-
+/* ═══ src/modules/sky.js ════════════════════════════════════════════════════════ */
 /*─────────────────────────── §4  SKY & CUMULUS ──────────────────────────────*/
 /* The visible clouds and the shadows they throw are two readings of the *same*
    coverage field, so a shadow always belongs to a cloud you can point at.     */
@@ -1674,7 +1763,7 @@ void main(){
   outColor = vec4(SAFE3(col), clamp(a, 0.0, 1.0));
 }`;
 
-
+/* ═══ src/modules/wind.js ═══════════════════════════════════════════════════════ */
 /*───────────────────────────── §5  THE WIND ─────────────────────────────────*/
 /*  Real wind is not sin(t).  It is a mean flow with a slowly-meandering
     direction, a Kolmogorov −5/3 cascade of eddies frozen into that flow and
@@ -1908,7 +1997,7 @@ void main(){
   outColor = vec4(c + g, 1.0);
 }`;
 
-
+/* ═══ src/modules/grass.js ══════════════════════════════════════════════════════ */
 /*──────────────────────────────── §6  GRASS ─────────────────────────────────*/
 /*  Every blade is a quadratic Bézier whose tip is solved for the quasi-static
     equilibrium of gravity, wind and Hookean recovery (Jahrmann & Wimmer 2017),
@@ -2495,7 +2584,7 @@ function grassBeforeRender(){
   this.geometry.instanceCount = this.userData.count;
 }
 
-
+/* ═══ src/modules/river.js ══════════════════════════════════════════════════════ */
 /*──────────────────────────────── §7  RIVER ─────────────────────────────────*/
 /* A swept ribbon on the spline.  Flow-aligned anisotropic streaks advect at the
    local current speed, the sun glitter is hard-quantised into discrete winking
@@ -2698,6 +2787,7 @@ void main(){
   outColor = vec4(SAFE3(col), gFogAmt);
 }`;
 
+/* ═══ src/modules/trees.js ══════════════════════════════════════════════════════ */
 /*──────────────────────────────── §8  TREES ─────────────────────────────────*/
 /* Trunks are generalised cylinders swept along a curve; canopies are clusters
    of scalloped clumps, because Ghibli foliage reads as sculpted mass, not
@@ -3057,6 +3147,7 @@ function scatterTrees(){
   return groups;
 }
 
+/* ═══ src/modules/viaduct.js ════════════════════════════════════════════════════ */
 /*────────────────────────── §9  VIADUCT ──────────────────────────*/
 /*  Five semicircular arches of jittered voussoirs on battered piers, dressed
     in ~3,000 individually-shaped stones over a solid mortar core.            */
@@ -3256,47 +3347,12 @@ function buildBridgeStones(){
   return inst;
 }
 
-
-/*──────────── generic distance field (reused by river, track, path) ────────*/
-function makeDF(points, res){
-  res = res||384;
-  const cell = WS/res;
-  const dist = new Float32Array(res*res).fill(1e9);
-  const par  = new Float32Array(res*res);
-  const sx = new Int16Array(res*res).fill(-9999), sy = new Int16Array(res*res).fill(-9999);
-  for(const p of points){
-    const gx=Math.round((p.x+HALF)/cell), gy=Math.round((p.z+HALF)/cell);
-    if(gx<0||gy<0||gx>=res||gy>=res) continue;
-    const i=gy*res+gx;
-    if(dist[i]>0){ dist[i]=0; sx[i]=gx; sy[i]=gy; par[i]=p.t; }
-  }
-  const relax=(i,j)=>{ if(sx[j]===-9999) return;
-    const gx=i%res, gy=(i/res)|0;
-    const d=(sx[j]-gx)*(sx[j]-gx)+(sy[j]-gy)*(sy[j]-gy);
-    if(d<dist[i]){ dist[i]=d; sx[i]=sx[j]; sy[i]=sy[j]; par[i]=par[j]; } };
-  for(let it=0; it<2; it++){
-    for(let y=0;y<res;y++) for(let x=0;x<res;x++){ const i=y*res+x;
-      if(x>0) relax(i,i-1); if(y>0) relax(i,i-res);
-      if(x>0&&y>0) relax(i,i-res-1); if(x<res-1&&y>0) relax(i,i-res+1); }
-    for(let y=res-1;y>=0;y--) for(let x=res-1;x>=0;x--){ const i=y*res+x;
-      if(x<res-1) relax(i,i+1); if(y<res-1) relax(i,i+res);
-      if(x<res-1&&y<res-1) relax(i,i+res+1); if(x>0&&y<res-1) relax(i,i+res-1); }
-  }
-  for(let i=0;i<res*res;i++) dist[i]=Math.sqrt(dist[i])*cell;
-  return (x,z)=>{
-    const fx=clamp((x+HALF)/cell,0,res-1.001), fy=clamp((z+HALF)/cell,0,res-1.001);
-    const x0=fx|0,y0=fy|0,tx=fx-x0,ty=fy-y0, i=y0*res+x0;
-    return { d: lerp(lerp(dist[i],dist[i+1],tx), lerp(dist[i+res],dist[i+res+1],tx), ty),
-             t: lerp(lerp(par[i],par[i+1],tx),  lerp(par[i+res],par[i+res+1],tx),  ty) };
-  };
-}
-
+/* ═══ src/modules/railway.js ════════════════════════════════════════════════════ */
 /*──────────────────────────── §9b  THE RAILWAY ─────────────────────────────*/
 /* The track is graded like a real railway: the raw ground profile is smoothed
    and then iteratively clamped to a maximum gradient of 2.5%, so the line
    cuts through the shoulders and rides an embankment across the flats.       */
 
-let TRACK = null;
 function trackAdjust(x, z, h){
   if(!TRACK) return h;
   const f = TRACK.field(x,z);
@@ -3368,7 +3424,7 @@ function buildTrack(){
   }
   const field = makeDF(pts, 384);
   const yAt = (t)=>{ const i=clamp(Math.round(t*N),0,N); return pts[i].y; };
-  TRACK = { pts, total, field, yAt, iB, sMid, N };
+  setTrack({ pts, total, field, yAt, iB, sMid, N });
   return TRACK;
 }
 function trackPose(s){                        // world position + tangent at arc length s
@@ -3765,6 +3821,7 @@ function pushSolid(x, z, hx, hz, yaw){
                 rr: Math.pow(Math.hypot(hx,hz) + 1.4, 2) });
 }
 
+/* ═══ src/modules/village.js ════════════════════════════════════════════════════ */
 /*───────────────────────────── §9c  THE VILLAGE ────────────────────────────*/
 function buildVillage(){
   const M = PB(); const r = rng(8080);
@@ -3922,7 +3979,7 @@ function buildMillWheel(mill){
   return finishPainted(M);
 }
 
-
+/* ═══ src/modules/train.js ══════════════════════════════════════════════════════ */
 /*──────────────────────────── §10  THE TRAIN ───────────────────────────────*/
 /* A 2-6-0 with a solved valve gear: the crank pin drives the main rod, which
    drives the crosshead through a real slider-crank solution, and the cranks
@@ -4350,7 +4407,7 @@ void main(){
   outColor = vec4(SAFE3(col), clamp(a, 0.0, 1.0));
 }`;
 
-
+/* ═══ src/modules/post.js ═══════════════════════════════════════════════════════ */
 /*──────────────────────── §12  POST — THE FILM PRINT ───────────────────────*/
 /* Bloom, watercolour softening, chroma bleed, a custom print curve that pulls
    shadows violet and highlights cream, paper grain, vignette, and an ordered
@@ -4543,6 +4600,7 @@ void main(){
   outColor = vec4(c, 1.0);
 }`;
 
+/* ═══ src/modules/walker.js ═════════════════════════════════════════════════════ */
 /*──────────────────────────── §13  CAMERA & GAIT ───────────────────────────*/
 /* A real gait clock drives head bob, footstep audio and the grass the walker
    parts, so they can never drift out of sync.                                */
@@ -4698,7 +4756,7 @@ class Walker {
   }
 }
 
-
+/* ═══ src/modules/audio.js ══════════════════════════════════════════════════════ */
 /*──────────────────────── §14  AUDIO — ALL SYNTHESISED ─────────────────────*/
 /* No samples.  Noise buffers, oscillators, biquads, and one convolution
    reverb whose impulse response is generated from decaying noise.  The wind
@@ -5053,6 +5111,12 @@ class Audio {
   }
 }
 
+/* ═══ src/modules/main.js ═══════════════════════════════════════════════════════ */
+/*  What remains here is the boot sequence, the frame loop and the sections not
+    yet carved out into modules.  The module map and the extraction method live
+    in AGENTS.md §9; the shadow contract every mesh must honour is in
+    scene-contract.js.                                                        */
+
 
 /*──────────────────────────── §15  BOOT & MAIN LOOP ────────────────────────*/
 
@@ -5079,53 +5143,12 @@ sunCam.matrixWorldAutoUpdate = true;
 const reflCam = new THREE.PerspectiveCamera(CFG.fov, 1, 0.12, 14000);
 reflCam.matrixWorldAutoUpdate = false;
 
-const SUN = (()=>{
-  const el=CFG.sunElev*DEG, az=CFG.sunAzim*DEG;
-  return new THREE.Vector3(Math.sin(az)*Math.cos(el), Math.sin(el), Math.cos(az)*Math.cos(el)).normalize();
-})();
-
-const G = {
-  uTime:        { value:0 },
-  uSunDir:      { value:SUN.clone() },
-  uCamPos:      { value:new THREE.Vector3() },
-  uWindOrigin:  { value:new THREE.Vector2() },
-  uCloudDrift:  { value:new THREE.Vector2() },
-  uMeanWind:    { value:new THREE.Vector2(3,1) },
-  uWindTex:     { value:null },
-  uHeight:      { value:null },
-  uSplat:       { value:null },
-  uMeadow:      { value:null },
-  uShadowMap:   { value:null },
-  uCloudSh:     { value:null },
-  uCloudShOrigin:{ value:new THREE.Vector2() },
-  uLightMat:    { value:new THREE.Matrix4() },
-  uShadowTexel: { value:1/2048 },
-  uPuff:        { value:null },
-  uProxyC:      { value:new THREE.Vector2() },
-  uShadowC:     { value:new THREE.Vector2() },
-  uCull:        { value:new THREE.Vector4(0,0,-1.1,0) },
-  uWindLag:     { value:new THREE.Vector2() },
-  uCloudAmount: { value:1.0 },
-  uFogMul:      { value:1.0 },
-};
-const U = extra => Object.assign({}, G, extra||{});
-const RSM = (vs, fs, uni, opt)=> new THREE.RawShaderMaterial(Object.assign({
-  vertexShader: VHEAD + vs, fragmentShader: FHEAD + fs,
-  uniforms: uni, glslVersion: THREE.GLSL3,
-}, opt||{}));
 // Every depth-only material: the shadow map's colour attachment is written by
 // the driver and never read by anything, which is ~16 MB of pointless
 // bandwidth per shadow pass.  colorWrite:false also lets the hardware take its
 // double-speed depth-only path.
 const DSM = (vs, uni, opt)=> RSM(vs, DEPTH_FS, uni,
   Object.assign({ colorWrite:false }, opt||{}));
-const TRANSP = {
-  transparent:true, depthWrite:false, blending:THREE.CustomBlending,
-  blendSrc:THREE.SrcAlphaFactor, blendDst:THREE.OneMinusSrcAlphaFactor,
-  blendEquation:THREE.AddEquation,
-  blendSrcAlpha:THREE.ZeroFactor, blendDstAlpha:THREE.OneFactor,
-  blendEquationAlpha:THREE.AddEquation,
-};
 
 /*──────── fullscreen quad plumbing ────────*/
 const quadGeo = (()=>{

@@ -345,21 +345,31 @@ that and refuses to emit if the source drifts from the rules in its docstring
 `export {}`, `three` the only bare specifier). **Keep the source obeying those
 rules** rather than loosening the parser.
 
-Extracted so far: `config.js`, `palette.js`, `scene-contract.js`, `math.js`.
-Everything else is still in `main.js`, which shrinks as sections move out.
+**Done.** 22 modules, none over 610 lines; `main.js` is 1,149 and holds the
+boot sequence, render passes, frame loop and input.
 
-**Method that worked, and is worth repeating for each remaining section:** cut
-the section into its own module, add `export` to the names other code needs,
-add the matching `import` to `main.js`, rebuild, and diff the bundle against
-the previous `dist/index.html`. Because the bundle is a concatenation, a
-correct extraction produces **zero change in executable code** — the only
-differences should be module separator comments. That diff is a far stronger
-check than booting, and it catches a missed export instantly.
+Four modules exist for reasons that are not obvious from their contents, and
+merging them back would reintroduce the bug they were created to fix:
 
-The hard part is still ahead: the module-level bake state in §5.4
-(`heightData`, `splatData`, `meadowData`, `TRACK`, `BR`, `SOLIDS`,
-`RIVER_PTS`), which must become an explicit `world` module without breaking the
-CPU/GPU mirror discipline.
+| Module | Why it is separate |
+| --- | --- |
+| `field.js` | `makeDF` lived in the viaduct, but the terrain needs it while baking the splat map — `terrain → viaduct → terrain` was a cycle |
+| `track-ref.js` | Owns the `TRACK` slot. It was in `railway.js`, making `terrain → railway → viaduct → terrain` a cycle. An importer cannot assign to an imported binding, hence the `setTrack` setter |
+| `materials.js` | `G`/`U`/`RSM`/`TRANSP` were in §15; `train.js` builds materials during construction and nothing can import from the entry module |
+| `config.js` | Also owns `HM`/`WS`/`HALF`, moved off `terrain.js` so `field.js` can reach them without importing the terrain |
+
+`DSM` deliberately stayed in `main.js`: only main uses it, and it depends on
+`DEPTH_FS` from `post.js`.
+
+**Two checks, and you need both — they catch different things.**
+
+1. *Diff the bundle.* Because it is a concatenation in a fixed order, a correct
+   change produces **zero difference in executable code**. This catches
+   reordering and dropped lines instantly.
+2. *Boot the un-bundled `src/` over HTTP.* The bundle shares one scope, so it
+   runs fine with imports missing or cyclic. **Only the module path can catch a
+   missing import or an import cycle.** Every cycle above was found this way,
+   and never by the bundle.
 
 ### Not yet verified
 

@@ -92,36 +92,78 @@ def parse(path: Path):
 
 
 def collect(entry: Path):
-    """Depth-first post-order: a module is emitted after everything it imports."""
-    order, state, bare = [], {}, []
-    modules = {}
+    """Emission order is the order main.js imports things, with main.js last.
 
-    def visit(path: Path, stack):
-        if state.get(path) == "done":
-            return
-        if state.get(path) == "active":
-            cyc = " -> ".join(p.name for p in stack + [path])
-            raise BuildError(f"circular import: {cyc}")
+    Order is taken from the entry's import list rather than inferred from the
+    dependency graph, for two reasons.
+
+    First, the graph genuinely has cycles: the terrain is carved to accept the
+    railway (it reads TRACK) and the railway is graded against the terrain (it
+    calls terrainAt). Real ES modules resolve that fine, because every
+    cross-reference sits inside a function body evaluated long afterwards during
+    boot — but a cycle leaves a topological sort undefined, so there would be no
+    single "correct" concatenation to derive.
+
+    Second, and more useful: keeping the entry's order means the bundle stays in
+    the same order as the original single file. Every extraction can then be
+    verified by diffing the new bundle against the previous one and requiring
+    ZERO change in executable code, which is a far stronger check than booting.
+
+    The cost is one rule: every module must be imported by main.js directly,
+    even if another module already imports it.
+    """
+    if not entry.exists():
+        raise BuildError(f"missing entry module: {entry}")
+
+    entry_deps, bare, entry_body = parse(entry)
+    order, modules = [], {}
+
+    seen = set()
+    for path in entry_deps:  # keep first occurrence, drop duplicates
+        if path not in seen:
+            seen.add(path)
+            order.append(path)
+
+    for path in order:
         if not path.exists():
             raise BuildError(f"missing module: {path}")
-        state[path] = "active"
         deps, b, body = parse(path)
         modules[path] = body
         bare.extend(b)
         for d in deps:
-            visit(d, stack + [path])
-        state[path] = "done"
-        order.append(path)
+            if d not in seen and d != entry:
+                raise BuildError(
+                    f"{path.relative_to(ROOT)} imports {d.name}, which main.js does "
+                    f"not.\n  Add it to main.js's imports too — bundle order comes "
+                    f"from there, so every module must appear in that list."
+                )
 
-    visit(entry, [])
+    modules[entry] = entry_body
+    order.append(entry)
     return order, modules, bare
 
 
 def check_unique(order, modules):
+    """Reject names declared at top level in more than one module.
+
+    Shaders are embedded as template literals full of GLSL, and GLSL declares
+    things like `const float W_SIZE = ...` at column 0 — which looks exactly
+    like a JS declaration of a variable named `float`. Every shader module
+    would then collide with every other on `float`, `vec3`, `mat2` and friends.
+    So template-literal bodies are skipped by tracking backtick parity. That is
+    a heuristic, not a parser: it can miss a real duplicate, in which case the
+    browser still reports the redeclaration as a SyntaxError at load.
+    """
     seen = {}
     dupes = []
     for path in order:
+        in_template = False
         for line in modules[path]:
+            was_inside = in_template
+            if (line.count("`") - line.count("\\`")) % 2:
+                in_template = not in_template
+            if was_inside:
+                continue
             m = DECL_RE.match(line)
             if not m:
                 continue

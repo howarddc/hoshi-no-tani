@@ -81,3 +81,8 @@ export const RINGS = [
   { chunk:100,  blades: 307000, near:76,   far:290,  dn:76,  wpx:2.75, hs:1.36 }, //   31/m²
   { chunk:250,  blades: 231000, near:260,  far:1250, dn:260, wpx:4.00, hs:1.95 }, //  3.7/m²
 ];
+
+// Derived world dimensions. They live here rather than in terrain.js so that
+// field.js can reach them without importing the terrain, which would make
+// terrain -> field -> terrain a cycle.
+export const HM = CFG.hmRes, WS = CFG.world, HALF = WS/2;
