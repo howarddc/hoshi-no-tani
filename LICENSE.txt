@@ -1,6 +1,7 @@
 The MIT License (MIT)
 
 Copyright (c) 2026 Lentils (https://codepen.io/editor/lentils801/pen/019f9b4b-10d7-7f77-817f-f4eb83fdb289)
+Copyright (c) 2026 Rob Howard (https://github.com/howarddc)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +20,33 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+================================================================================
+PROVENANCE  (informational; the licence granted above is unaffected)
+================================================================================
+
+This repository is a fork.
+
+The original work — Hoshi-no-Tani, "The Valley of Stars": the procedural
+terrain, sky and cumulus, wind field, grass, river, trees, viaduct, railway,
+village, steam train, post-processing chain and synthesised audio — was created
+by Lentils and published on CodePen under the MIT License.
+
+    https://codepen.io/editor/lentils801/pen/019f9b4b-10d7-7f77-817f-f4eb83fdb289
+
+The subsequent work of making that single-file demo portable, maintainable and
+extensible by others is by Rob Howard, and is released under the same MIT
+License above. It comprises:
+
+  * splitting the 6,184-line single file into 22 ES modules
+  * tools/build.py, which reassembles those modules into a single
+    self-contained file that still runs from file://
+  * replacing an inert `noCast` flag with an enforced scene contract
+    (addMesh / addBulk / setDepth), so a mesh can no longer silently
+    stop casting a shadow
+  * AGENTS.md and README.md
+  * the continuous-integration checks and tools/file-protocol-test/
+
+Both copyright notices above must be retained in all copies or substantial
+portions of the Software, including derivative works.

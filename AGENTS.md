@@ -17,13 +17,18 @@ There is no build step, no bundler, no test suite, and no framework.
 
 ### Three hard rules
 
-**1. This is a fork. Do not touch the copyright notice.**
-The original was written by **Lentils** (codepen.io/lentils801) and is MIT
-licensed. `LICENSE.txt` carries `Copyright (c) 2026 Lentils` and MIT requires
-that notice survive verbatim in all copies and derivative works. Never edit,
-reword, or "update" that line. The repo owner (Rob Howard) has not added his
-own copyright line for modifications; that is his decision to make, not one to
-make on his behalf.
+**1. This is a fork with two copyright holders. Do not touch either notice.**
+The valley itself was written by **Lentils** (codepen.io/lentils801); the work
+of modularising it, the build system, the scene contract, the docs and CI is by
+**Rob Howard**. Both are MIT, and `LICENSE.txt` carries both notices plus a
+provenance breakdown. MIT requires those notices survive verbatim in all copies
+and derivative works — never edit, reword, reorder or "tidy" them, and do not
+drop Lentils' line on the grounds that the file has since been rewritten.
+
+The notices also live in the banner `tools/build.py` writes into
+`dist/index.html`, because that file is built to be distributed on its own and
+is therefore a "copy" in the sense the licence means. If you change the banner,
+keep them.
 
 **2. Nothing may be loaded from a file. Everything is generated.**
 The loading screen promises "no textures, no models, no recordings," and that

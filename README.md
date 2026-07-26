@@ -6,15 +6,26 @@ soundtrack are generated at runtime — no textures, no models, no audio samples
 
 ## Attribution
 
-This is a fork. The original work was created by **Lentils** on CodePen:
+This repository is a fork, and the work in it has two authors.
+
+**The valley itself** — the procedural terrain, sky and cumulus, wind field,
+grass, river, trees, viaduct, railway, village, steam train, post-processing
+chain and synthesised audio — was created by **Lentils** and published on
+CodePen under the MIT License:
 
 - Original pen: <https://codepen.io/editor/lentils801/pen/019f9b4b-10d7-7f77-817f-f4eb83fdb289>
 - Original author: Lentils (<https://codepen.io/lentils801>)
 
-Released under the MIT License, `Copyright (c) 2026 Lentils`. The full text and
-the original copyright notice are retained verbatim in [LICENSE.txt](LICENSE.txt)
-and must be preserved in any copy or substantial portion of this software,
-including derivative works.
+**Making it portable and extensible** — splitting the single 6,184-line file
+into 22 ES modules, the build system that reassembles a `file://`-capable
+single file, the enforced scene contract, the documentation and the CI checks —
+is by **Rob Howard** (<https://github.com/howarddc>), released under the same
+licence.
+
+Both copyright notices are recorded in [LICENSE.txt](LICENSE.txt), along with a
+fuller breakdown of who wrote what, and both must be preserved in any copy or
+substantial portion of this software, including derivative works. The generated
+`dist/index.html` carries them too, since it is built to be distributed alone.
 
 ## Running it
 
