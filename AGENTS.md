@@ -44,13 +44,21 @@ publishing is a separate, outward-facing decision.
 ## 2. Layout
 
 ```
-AGENTS.md         this file
-README.md         user-facing: what it is, attribution, controls, URL params
-LICENSE.txt       MIT, Copyright (c) 2026 Lentils — DO NOT EDIT
-.gitignore        ignores .DS_Store, node_modules/, dist/
-src/index.html    the entire application
-src/package.json  declares three@0.180.0 — matches the import map pin
+AGENTS.md            this file
+README.md            user-facing: what it is, attribution, controls, URL params
+LICENSE.txt          MIT, Copyright (c) 2026 Lentils — DO NOT EDIT
+src/index.html       the HTML shell — markup, CSS, import map, error handler
+src/modules/*.js     the application, as ES modules
+src/package.json     declares three@0.180.0 — matches the import map pin
+tools/build.py       bundles src/ -> dist/index.html
+tools/file-protocol-test/   evidence for why the bundle exists
+dist/index.html      GENERATED, and tracked. Never hand-edit — rebuild.
 ```
+
+**`dist/index.html` is generated but committed.** It is the artefact a user
+double-clicks, so a fresh clone must contain it. It carries a DO-NOT-EDIT
+banner. After changing anything under `src/`, run `python3 tools/build.py` and
+commit the result alongside the source; `--check` fails if `dist/` is stale.
 
 `src/package.json` is **not** read by anything at runtime; there is no bundler.
 It exists to record the version the import map pins. If you change one, change
@@ -62,23 +70,20 @@ releases.
 
 ## 3. Running and verifying
 
-**The demo runs straight from `file://`** — double-clicking `src/index.html`
-works. The module script is inline, so no local file is ever fetched, and the
-single `three` import resolves to a CDN URL that sends
-`Access-Control-Allow-Origin: *`, which an opaque `null` origin is allowed to
-read. Serving over HTTP also works and is nicer while editing:
+**`dist/index.html` runs straight from `file://`** — double-click it. The
+bundled module script is inline, so no local file is fetched, and the single
+`three` import resolves to a CDN URL sending `Access-Control-Allow-Origin: *`,
+which an opaque `null` origin may read.
+
+**`src/` needs a server.** Relative imports between modules *are* same-origin
+fetches from a `null` origin and are blocked under `file://` — confirmed by
+running `tools/file-protocol-test/` in Chrome on 2026-07-26 (test A passed,
+test B failed). That asymmetry is the entire reason `tools/build.py` exists.
 
 ```bash
-cd src && python3 -m http.server 8000
+cd src && python3 -m http.server 8000   # develop here
+python3 tools/build.py                  # then regenerate dist/
 ```
-
-**This constrains step 4.** A module split introduces relative imports
-(`./terrain.js`), which *are* same-origin fetches from a `null` origin and are
-blocked under `file://`. Splitting the app into local modules would therefore
-break double-click-to-run unless a bundling step reassembles a single file.
-The owner has said he wants `file://` support kept. `tools/file-protocol-test/`
-exists to settle this empirically — open it from `file://` and read the two
-rows.
 
 ### If you are an agent in a sandboxed environment, read this
 
@@ -323,27 +328,38 @@ Agreed plan with the repo owner:
    attribution, pin Three.js~~ — done (`25c614f`)
 3. ~~Replace the inert `noCast` flag with the enforced §0c contract~~ — done
    (`9b5c849`)
-4. **Split `src/index.html` into ES modules** — next, and not yet started
+4. **Split `src/index.html` into ES modules** — *in progress*
 
 ### On step 4
 
-The `§` sections are already clean seams and the shader builders are pure
-`(config) → string`, so most of the split is mechanical. The real work is the
-module-level bake state listed in §5.4, which needs to become an explicit
-`world` module rather than ambient globals — that is the part requiring design
-thought, and the part most likely to break the CPU/GPU mirror discipline if
-done carelessly.
+Decided: plain ES modules plus `tools/build.py`, a dependency-free Python
+bundler. Node and esbuild were considered and rejected — Node is not installed,
+and the project's only dependency is one CDN URL, so a toolchain would be a
+large addition for a small benefit. The bundler can be swapped for esbuild
+later without touching the source.
 
-An open decision the owner has not yet made: stay dependency-free with plain ES
-modules and the CDN import map, or adopt Vite/esbuild and emit a bundled
-`dist/`. `.gitignore` already ignores `dist/` on the assumption the latter is
-possible. **Ask before choosing.**
+Concatenation is sound here *because* the app was one file: every top-level
+name is already unique and there are no circular imports. `build.py` asserts
+that and refuses to emit if the source drifts from the rules in its docstring
+(imports/exports at column 0, one per line, no `export default`, no
+`export {}`, `three` the only bare specifier). **Keep the source obeying those
+rules** rather than loosening the parser.
 
-The `file://` requirement (§3) weighs heavily here. Plain local modules break
-double-click-to-run; keeping it means a bundling step, and therefore Node,
-which is not currently installed. A third option is to keep the single file and
-impose structure inside it — zero build, `file://` preserved, but no real
-module boundaries.
+Extracted so far: `config.js`, `palette.js`, `scene-contract.js`, `math.js`.
+Everything else is still in `main.js`, which shrinks as sections move out.
+
+**Method that worked, and is worth repeating for each remaining section:** cut
+the section into its own module, add `export` to the names other code needs,
+add the matching `import` to `main.js`, rebuild, and diff the bundle against
+the previous `dist/index.html`. Because the bundle is a concatenation, a
+correct extraction produces **zero change in executable code** — the only
+differences should be module separator comments. That diff is a far stronger
+check than booting, and it catches a missed export instantly.
+
+The hard part is still ahead: the module-level bake state in §5.4
+(`heightData`, `splatData`, `meadowData`, `TRACK`, `BR`, `SOLIDS`,
+`RIVER_PTS`), which must become an explicit `world` module without breaking the
+CPU/GPU mirror discipline.
 
 ### Not yet verified
 

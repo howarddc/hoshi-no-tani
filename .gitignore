@@ -1,3 +1,6 @@
 .DS_Store
 node_modules/
-dist/
+
+# dist/index.html IS tracked — it is the double-clickable, file://-capable
+# build of src/, produced by tools/build.py. Regenerate it rather than
+# editing it; the file carries a DO-NOT-EDIT banner saying so.

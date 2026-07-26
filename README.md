@@ -18,20 +18,29 @@ including derivative works.
 
 ## Running it
 
-The demo is a single self-contained HTML file. Three.js is loaded from a CDN via
-an import map, so an internet connection is needed — but nothing else is.
+**Just open `dist/index.html` in a browser.** It is a single self-contained
+file and runs straight from `file://` — no server, no install. Three.js comes
+from a CDN, so an internet connection is needed, but nothing else is.
 
-**Just open `src/index.html` in a browser.** This works straight from `file://`:
-the module script is inline, so no local file is ever fetched, and the one
-import is a remote CDN URL that sends permissive CORS headers.
+Click **Enter the valley** once loading completes.
 
-Serving over HTTP also works, and is the nicer option while editing:
+### Developing
+
+The source lives as ES modules under `src/modules/`. Those need a server,
+because relative imports are blocked under `file://`:
 
 ```bash
 cd src && python3 -m http.server 8000
 ```
 
-Either way, click **Enter the valley** once loading completes.
+Then open <http://localhost:8000>. After editing, regenerate the
+single-file build:
+
+```bash
+python3 tools/build.py
+```
+
+`tools/build.py --check` verifies `dist/` is up to date without writing.
 
 ### Controls
 
@@ -57,14 +66,24 @@ iterating.
 ## Layout
 
 ```
-src/index.html    the entire application (~6,100 lines, 15 numbered sections)
-src/package.json  declares the Three.js version pinned in the import map
+src/index.html     the HTML shell — markup, CSS, import map
+src/modules/*.js   the application, as ES modules
+src/package.json   declares the Three.js version pinned in the import map
+tools/build.py     bundles src/ into the single-file dist/
+dist/index.html    GENERATED — the file:// build. Run it; don't edit it.
 ```
 
-`src/index.html` is organised into numbered sections with a table of contents at
-the top of its module script — config and palette, math and noise, the GLSL
-library, terrain, sky and clouds, wind, grass, river, trees, structures, train,
-particles, post-processing, camera, audio, and the boot sequence.
+The application is organised into numbered sections. `config.js`, `palette.js`,
+`scene-contract.js` and `math.js` have been extracted so far; `main.js` still
+holds the rest — the GLSL library, terrain, sky and clouds, wind, grass, river,
+trees, structures, train, particles, post-processing, camera, audio, and the
+boot sequence — and is being carved up section by section.
+
+`dist/index.html` exists because the demo must stay double-clickable. An inline
+module script can run from `file://`; relative imports between local modules
+cannot, since they are same-origin fetches from an opaque `null` origin. The
+build concatenates the modules back into one inline script. See
+`tools/file-protocol-test/` for the evidence.
 
 ## License
 
