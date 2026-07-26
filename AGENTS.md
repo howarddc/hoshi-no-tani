@@ -62,14 +62,23 @@ releases.
 
 ## 3. Running and verifying
 
-The demo must be served over HTTP. Opening `index.html` from disk will not
-work: ES modules and import maps are blocked under `file://`.
+**The demo runs straight from `file://`** — double-clicking `src/index.html`
+works. The module script is inline, so no local file is ever fetched, and the
+single `three` import resolves to a CDN URL that sends
+`Access-Control-Allow-Origin: *`, which an opaque `null` origin is allowed to
+read. Serving over HTTP also works and is nicer while editing:
 
 ```bash
 cd src && python3 -m http.server 8000
 ```
 
-Then open `http://localhost:8000` and click **Enter the valley**.
+**This constrains step 4.** A module split introduces relative imports
+(`./terrain.js`), which *are* same-origin fetches from a `null` origin and are
+blocked under `file://`. Splitting the app into local modules would therefore
+break double-click-to-run unless a bundling step reassembles a single file.
+The owner has said he wants `file://` support kept. `tools/file-protocol-test/`
+exists to settle this empirically — open it from `file://` and read the two
+rows.
 
 ### If you are an agent in a sandboxed environment, read this
 
@@ -329,6 +338,12 @@ An open decision the owner has not yet made: stay dependency-free with plain ES
 modules and the CDN import map, or adopt Vite/esbuild and emit a bundled
 `dist/`. `.gitignore` already ignores `dist/` on the assumption the latter is
 possible. **Ask before choosing.**
+
+The `file://` requirement (§3) weighs heavily here. Plain local modules break
+double-click-to-run; keeping it means a bundling step, and therefore Node,
+which is not currently installed. A third option is to keep the single file and
+impose structure inside it — zero build, `file://` preserved, but no real
+module boundaries.
 
 ### Not yet verified
 

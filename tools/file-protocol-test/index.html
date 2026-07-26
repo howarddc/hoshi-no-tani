@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>file:// module support test</title>
+<!--
+  Why this exists
+  ───────────────
+  Hoshi-no-Tani currently runs straight from file:// (double-click src/index.html)
+  because its module script is INLINE — no local .js is ever fetched — and its one
+  import is a remote CDN URL that sends Access-Control-Allow-Origin: *.
+
+  Splitting the app into local ES modules would introduce relative imports like
+  ./terrain.js, which are same-origin fetches from an opaque `null` origin and may
+  be blocked. This page tests both cases so the decision rests on evidence.
+
+  Run it by DOUBLE-CLICKING this file. Confirm the address bar reads file:/// —
+  if it opens via localhost, both tests pass trivially and prove nothing.
+-->
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js" } }
+</script>
+<style>
+  body{font:16px/1.6 system-ui,-apple-system,sans-serif;max-width:44rem;
+       margin:3rem auto;padding:0 1.5rem;color:#222}
+  .r{padding:.9rem 1.1rem;border-radius:8px;margin:.6rem 0;border:1px solid #ccc}
+  .pass{background:#e7f6ec;border-color:#7fc99a}
+  .fail{background:#fdeaea;border-color:#e39c9c}
+  code{background:#f1f1f1;padding:.1rem .35rem;border-radius:4px}
+  h1{font-size:1.3rem} small{color:#555}
+  @media (prefers-color-scheme:dark){
+    body{background:#14181f;color:#e6e6e6}
+    .r{border-color:#3a4250} .pass{background:#16301f;border-color:#2f6b45}
+    .fail{background:#331a1a;border-color:#7a3b3b}
+    code{background:#232a35} small{color:#aaa}
+  }
+</style>
+</head>
+<body>
+<h1>Does this page's protocol support ES modules?</h1>
+<p>Protocol: <code id="proto"></code> — origin: <code id="orig"></code></p>
+<div id="out"></div>
+<p><small><b>A</b> is what Hoshi-no-Tani does today: an inline module importing
+<code>three</code> from the CDN. <b>B</b> is what splitting into local modules
+would require. If A passes and B fails, a module split needs a bundling step to
+keep <code>file://</code> working.</small></p>
+
+<script type="module">
+const out = document.getElementById('out');
+document.getElementById('proto').textContent = location.protocol;
+document.getElementById('orig').textContent = String(location.origin);
+
+const row = (label, ok, detail) => {
+  const d = document.createElement('div');
+  d.className = 'r ' + (ok ? 'pass' : 'fail');
+  d.innerHTML = `<b>${ok ? 'PASS' : 'FAIL'}</b> — ${label}` +
+                (detail ? `<br><small>${detail}</small>` : '');
+  out.appendChild(d);
+};
+
+try {
+  const THREE = await import('three');
+  row('A. Inline module importing <code>three</code> from the CDN',
+      true, 'three r' + THREE.REVISION);
+} catch (e) {
+  row('A. Inline module importing <code>three</code> from the CDN', false, e.message);
+}
+
+try {
+  const m = await import('./local-module.js');
+  row('B. Relative import of a local <code>./local-module.js</code>',
+      m.ok === true, 'loaded');
+} catch (e) {
+  row('B. Relative import of a local <code>./local-module.js</code>', false, e.message);
+}
+</script>
+</body>
+</html>

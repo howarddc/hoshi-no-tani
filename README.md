@@ -18,16 +18,20 @@ including derivative works.
 
 ## Running it
 
-The demo is a single self-contained HTML file that loads Three.js from a CDN via
-an import map. It needs to be served over HTTP — opening `index.html` from the
-filesystem will not work, because ES modules are blocked under `file://`.
+The demo is a single self-contained HTML file. Three.js is loaded from a CDN via
+an import map, so an internet connection is needed — but nothing else is.
+
+**Just open `src/index.html` in a browser.** This works straight from `file://`:
+the module script is inline, so no local file is ever fetched, and the one
+import is a remote CDN URL that sends permissive CORS headers.
+
+Serving over HTTP also works, and is the nicer option while editing:
 
 ```bash
 cd src && python3 -m http.server 8000
 ```
 
-Then open <http://localhost:8000>. Click **Enter the valley** once loading
-completes.
+Either way, click **Enter the valley** once loading completes.
 
 ### Controls
 
