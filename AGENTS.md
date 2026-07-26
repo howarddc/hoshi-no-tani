@@ -101,6 +101,14 @@ Two environment traps have cost real time before:
   same limit makes interactive camera work impractical: one frame per
   screenshot, so flying to a vantage point is not realistic.
 
+- **Close the preview tab when you finish.** This is a heavy real-time scene —
+  a million-blade grass field, planar reflections, a full post chain — and its
+  `requestAnimationFrame` loop runs for as long as the page is loaded, pinning
+  the machine's GPU and CPU. **Stopping the dev server does not stop it:** the
+  page is already in memory and keeps rendering. Verify with `tabs_context`
+  that nothing is left holding the scene, and do it *before* writing your
+  summary so it is not skipped if the turn ends early.
+
 Node is not installed on the owner's machine (`node`/`npx` absent), so there is
 no offline syntax check. **A full boot to READY in a browser is the
 parse-and-execute check.** The `#err` overlay catches both `window.onerror` and
