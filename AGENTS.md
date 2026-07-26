@@ -295,6 +295,40 @@ The classes are already dependency-injected — `GrassField(scene, uniforms,
 quality)`, `Train(scene, uni)`, `Particles(parent, uni, max, frag, order,
 sort)`, `Walker(cam)` — which is what makes the module split (below) tractable.
 
+### Worked example: adding a building to the village
+
+The shortest path that touches every rule that matters.
+
+1. **Model it** in `village.js`, using the painted-mesh toolkit — `PB()` to open
+   a buffer, then `pbox` / `pcyl` / `proof` to add boxes, cylinders and gabled
+   roofs, then `finishPainted(M)`. Colours come from `LC('wallA')` and friends,
+   never from literals: everything derives from `P` in `palette.js`.
+2. **Register collision** with `pushSolid(x, z, hx, hz, yaw)` as you place it.
+   Skip this and the walker strolls straight through the wall.
+3. **Sit it on the ground** with `sampleHeight(x, z)`. Do not re-derive terrain
+   height any other way — `sampleHeight` mirrors the GPU's bilinear filter
+   exactly, and that agreement is what keeps geometry, collision and shading
+   from drifting apart (§4).
+4. **Add it to the scene** with `addMesh(scene, mesh, someDepthMaterial)` — or
+   `NO_CAST` if it genuinely should not cast. There is no third option; the
+   call throws without it (§5.1). The village already builds a `paintedDepth`
+   you can share.
+5. **Set `renderOrder = 2`**, the ladder position for solid world geometry
+   (§5.2).
+6. **Rebuild and verify**:
+
+   ```bash
+   python3 tools/build.py          # fails on stale dist, bad imports, cycles
+   cd src && python3 -m http.server 8000    # then boot it and look
+   ```
+
+   Booting the un-bundled `src/` is not optional — it is the only check that
+   catches a missing import or a cycle (§9).
+7. **Close the browser tab** when you are done (§3), and commit.
+
+The same shape applies to a new prop, a new tree species, or a new particle
+type; only step 1 changes.
+
 ---
 
 ## 7. Known dead code
@@ -369,7 +403,14 @@ merging them back would reintroduce the bug they were created to fix:
 `DSM` deliberately stayed in `main.js`: only main uses it, and it depends on
 `DEPTH_FS` from `post.js`.
 
-**Two checks, and you need both — they catch different things.**
+`tools/build.py` enforces three things on every run, and CI runs it with
+`--check` on every push and pull request:
+
+- `dist/index.html` is in sync with `src/` (the easiest thing to forget)
+- every imported name is actually exported by the module it comes from
+- there are no import cycles
+
+**Two further checks, and you need both — they catch different things.**
 
 1. *Diff the bundle.* Because it is a concatenation in a fixed order, a correct
    change produces **zero difference in executable code**. This catches

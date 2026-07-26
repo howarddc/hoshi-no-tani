@@ -1,0 +1,22 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # One command covers three failure modes, all of which are easy to miss
+      # by hand and impossible to see in a rendered frame:
+      #   * dist/index.html out of sync with src/  (edit src, forget to rebuild)
+      #   * an imported name the target module does not export
+      #   * an import cycle, which the bundle tolerates but real modules do not
+      - name: dist/ in sync, imports resolve, no cycles
+        run: python3 tools/build.py --check

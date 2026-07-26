@@ -59,8 +59,42 @@ class BuildError(Exception):
     pass
 
 
+def named(clause: str):
+    """'{ a, b as c }' -> ['a', 'b']; '* as THREE' / 'X' -> []"""
+    clause = (clause or "").strip()
+    if not clause.startswith("{"):
+        return []
+    out = []
+    for part in clause.strip("{}").split(","):
+        part = part.strip()
+        if part:
+            out.append(part.split(" as ")[0].strip())
+    return out
+
+
+def exports_of(path: Path):
+    names, in_tpl = set(), False
+    for line in path.read_text().splitlines():
+        was = in_tpl
+        if (line.count("`") - line.count("\\`")) % 2:
+            in_tpl = not in_tpl
+        if was or not line.startswith("export "):
+            continue
+        m = DECL_RE.match(line)
+        if not m:
+            continue
+        names.add(m.group(1))
+        if re.match(r"^export\s+(const|let|var)\b", line):
+            names.update(EXTRA_DECL_RE.findall(line))
+    return names
+
+
 def parse(path: Path):
-    """-> (relative deps, bare imports, body lines with export/import stripped)"""
+    """-> (relative deps, bare imports, body lines with export/import stripped)
+
+    deps are (resolved_path, [imported names]) so the caller can verify that
+    every name actually exists in the target module.
+    """
     deps, bare, body = [], [], []
     for n, line in enumerate(path.read_text().splitlines(), 1):
         where = f"{path.relative_to(ROOT)}:{n}"
@@ -77,7 +111,7 @@ def parse(path: Path):
             if spec.startswith("."):
                 if not spec.endswith(".js"):
                     raise BuildError(f"{where}: relative import must end in .js")
-                deps.append((path.parent / spec).resolve())
+                deps.append(((path.parent / spec).resolve(), named(m.group(1)), where))
             else:
                 if spec != "three":
                     raise BuildError(
@@ -119,28 +153,85 @@ def collect(entry: Path):
     order, modules = [], {}
 
     seen = set()
-    for path in entry_deps:  # keep first occurrence, drop duplicates
+    for path, _, _ in entry_deps:  # keep first occurrence, drop duplicates
         if path not in seen:
             seen.add(path)
             order.append(path)
 
+    graph, all_deps = {}, list(entry_deps)
     for path in order:
         if not path.exists():
             raise BuildError(f"missing module: {path}")
         deps, b, body = parse(path)
         modules[path] = body
         bare.extend(b)
-        for d in deps:
+        graph[path] = [d for d, _, _ in deps]
+        all_deps.extend(deps)
+        for d, _, _ in deps:
             if d not in seen and d != entry:
                 raise BuildError(
                     f"{path.relative_to(ROOT)} imports {d.name}, which main.js does "
                     f"not.\n  Add it to main.js's imports too — bundle order comes "
                     f"from there, so every module must appear in that list."
                 )
+    graph[entry] = [d for d, _, _ in entry_deps]
+
+    check_imports(all_deps)
+    check_acyclic(graph, entry)
 
     modules[entry] = entry_body
     order.append(entry)
     return order, modules, bare
+
+
+def check_imports(deps):
+    """Every imported name must actually be exported by the target module.
+
+    The bundle shares one scope, so it runs happily with a name imported from
+    the wrong module — the mistake only shows up when the un-bundled modules
+    are loaded. Catching it here means `build.py` fails instead.
+    """
+    cache, bad = {}, []
+    for path, names, where in deps:
+        if path not in cache:
+            cache[path] = exports_of(path)
+        for n in names:
+            if n not in cache[path]:
+                bad.append(f"  {where}: {path.name} does not export `{n}`")
+    if bad:
+        raise BuildError("imported names that do not exist:\n" + "\n".join(bad))
+
+
+def check_acyclic(graph, entry):
+    """Reject import cycles.
+
+    A cycle does not disturb the bundle — order comes from main.js and one
+    shared scope hides everything — but it breaks the un-bundled module path,
+    where the browser evaluates a cycle in an order that can leave a `const`
+    still in its temporal dead zone. That is a genuinely confusing failure
+    ("Cannot access 'BRIDGE' before initialization"), and it is invisible to
+    every check except actually loading the modules. There are currently no
+    cycles; this keeps it that way. If you hit it, move the shared thing down
+    into a leaf module — see field.js and track-ref.js, which exist for exactly
+    this reason.
+    """
+    stack, done, found = [], set(), []
+
+    def visit(n):
+        if n in stack:
+            found.append(" -> ".join(p.name for p in stack[stack.index(n):] + [n]))
+            return
+        if n in done:
+            return
+        stack.append(n)
+        for d in graph.get(n, ()):
+            visit(d)
+        stack.pop()
+        done.add(n)
+
+    visit(entry)
+    if found:
+        raise BuildError("import cycle:\n  " + "\n  ".join(sorted(set(found))))
 
 
 def check_unique(order, modules):
@@ -205,9 +296,28 @@ def build() -> str:
         chunks.append("\n".join(modules[path]).strip("\n"))
         chunks.append("")
 
+    # This file is designed to be downloaded and passed around on its own, so
+    # it is a "copy" in the sense the MIT licence means: the notice has to
+    # travel with it. Keep this banner in the output.
     banner = (
         "<!-- ══════════════════════════════════════════════════════════════════\n"
-        "     GENERATED FILE — DO NOT EDIT.\n"
+        "     Hoshi-no-Tani — The Valley of Stars\n"
+        "     A procedural Ghibli valley in WebGL.\n"
+        "\n"
+        "     Copyright (c) 2026 Lentils  ·  https://codepen.io/lentils801\n"
+        "     Released under the MIT License. Permission is hereby granted, free\n"
+        "     of charge, to any person obtaining a copy of this software and\n"
+        "     associated documentation files (the \"Software\"), to deal in the\n"
+        "     Software without restriction, including without limitation the\n"
+        "     rights to use, copy, modify, merge, publish, distribute,\n"
+        "     sublicense, and/or sell copies of the Software, and to permit\n"
+        "     persons to whom the Software is furnished to do so, subject to\n"
+        "     the following conditions: the above copyright notice and this\n"
+        "     permission notice shall be included in all copies or substantial\n"
+        "     portions of the Software. THE SOFTWARE IS PROVIDED \"AS IS\",\n"
+        "     WITHOUT WARRANTY OF ANY KIND. See LICENSE.txt for the full text.\n"
+        "\n"
+        "     ── GENERATED FILE — DO NOT EDIT ──\n"
         "     Built from src/ by tools/build.py. Edit the modules in\n"
         "     src/modules/ and re-run:  python3 tools/build.py\n"
         "     This bundled form exists so the demo runs from file://, which\n"
