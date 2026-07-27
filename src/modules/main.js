@@ -18,6 +18,7 @@ import { BR, brPoint, buildBridgeCore, buildBridgeStones, pierCentres } from './
 import { PAINTED_FS, PAINTED_VS, SOLID_FS, SOLID_VS, STONE_FS, STONE_VS, buildPermanentWay, buildTrack, roundedBoxGeometry, trackAdjust, trackPose } from './railway.js';
 import { buildMillWheel, buildVillage } from './village.js';
 import { BIRD_FS, MOTE_FS, Particles, SMOKE_FS, Train } from './train.js';
+import { buildCorgis } from './corgi.js';
 import { BLUR_FS, BRIGHT_FS, COMPOSITE_FS, DEPTH_FS, DOWN_FS, UP_FS } from './post.js';
 import { Walker } from './walker.js';
 import { Audio } from './audio.js';
@@ -105,6 +106,7 @@ const audio = new Audio();
 let walker, grass, train, smoke, motes, birdsP, cloudObj, skyMesh, waterMesh, terrainMesh;
 let trees=[], ridges=[], reflectSet=[];
 let millWheel=null, villageSmokers=[], proxyTerrain=null, puffRT=null;
+let corgis=null;
 let cloudShRT=null, cloudShMat=null, lifeGroup=null;
 
 /*──────── the whole build ────────*/
@@ -337,6 +339,15 @@ async function boot(){
   setDepth(train.group, DSM(PAINTED_VS(), U(), {side:THREE.DoubleSide}));
   reflectSet.push(train.group);
 
+  /*── corgis ──*/
+  // They share the train's painted material, so they cost no extra shader
+  // compile; the depth variant is their own because setDepth walks a subtree
+  // and the train's is already in place.
+  setStat('letting the dogs out', 0.85); await idle();
+  corgis = buildCorgis(paintedMat, 6);
+  setDepth(corgis.group, DSM(PAINTED_VS(), U(), {side:THREE.DoubleSide}));
+  scene.add(corgis.group);
+
   /*── particles ──*/
   // one container, so the shadow and reflection passes skip all of them with a
   // single flag rather than a save-record per mesh per pass
@@ -415,6 +426,7 @@ async function boot(){
     b.classList.toggle('on', +b.dataset.q === State.q);
   State.running = true;
   window.__ready = true; window.__W = walker; window.__H = sampleHeight;
+  window.__corgis = corgis;
   // pre-roll a few frames so the first visible frame is fully warmed
   for(let i=0;i<3;i++){ frame(performance.now()); }
   requestAnimationFrame(loop);
@@ -939,6 +951,7 @@ function frame(now){
     State.trainPan = (rgt.x*dx+rgt.z*dz)/L;
   }
   if(millWheel) millWheel.rotation.z -= dt*0.55;
+  if(corgis) corgis.update(dt, tAcc);
 
   updateSmoke(dt); emitVillageSmoke(dt);
   updateMotes(dt, camera); updateBirds(dt, tAcc);

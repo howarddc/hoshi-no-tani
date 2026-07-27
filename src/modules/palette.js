@@ -37,6 +37,10 @@ export const P = {
   boiler:'#2B333C', boilerLit:'#4E5763', boilerRim:'#8794A0', livery:'#94403A',
   brass:'#CBA44E', carBody:'#3C6152', carBand:'#EADEC2', carWin:'#FFDE9E',
   smokeNew:'#F4EDE3', smokeOld:'#B5ACB6',
+  // corgis — the four Pembroke coats, plus the parts every coat shares
+  dogRed:'#C4763F', dogSable:'#9C5A33', dogFawn:'#D9A469', dogBlack:'#3B3A42',
+  dogTan:'#B87A45', dogCream:'#F2E7D2', dogWhite:'#FBF6EC',
+  dogNose:'#2B2A30', dogTongue:'#D4707C',
   // light
   sun:'#FFD79C', ambSky:'#9EC6E6', ambGround:'#AA9C64', shadowTint:'#5C6E9E',
 };
