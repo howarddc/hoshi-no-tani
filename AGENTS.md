@@ -401,7 +401,7 @@ that and refuses to emit if the source drifts from the rules in its docstring
 `export {}`, `three` the only bare specifier). **Keep the source obeying those
 rules** rather than loosening the parser.
 
-**Done.** 23 modules, none over 610 lines; `main.js` is 1,149 and holds the
+**Done.** 24 modules, none over 610 lines; `main.js` is 1,149 and holds the
 boot sequence, render passes, frame loop and input.
 
 Four modules exist for reasons that are not obvious from their contents, and

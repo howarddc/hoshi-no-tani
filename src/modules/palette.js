@@ -41,6 +41,10 @@ export const P = {
   dogRed:'#C4763F', dogSable:'#9C5A33', dogFawn:'#D9A469', dogBlack:'#3B3A42',
   dogTan:'#B87A45', dogCream:'#F2E7D2', dogWhite:'#FBF6EC',
   dogNose:'#2B2A30', dogTongue:'#D4707C',
+  // the treat, the hand offering it, and the hearts that follow
+  treatBiscuit:'#C9A063', treatBiscuitDark:'#A87F46',
+  handSkin:'#C08A63', handCuff:'#8FA4B8',
+  heartCore:'#F58CA0', heartEdge:'#D6455F',
   // light
   sun:'#FFD79C', ambSky:'#9EC6E6', ambGround:'#AA9C64', shadowTint:'#5C6E9E',
 };

@@ -9,7 +9,7 @@ anywhere in this repository.
 
 **This repo exists to be taken apart.** The demo arrived as a single
 6,184-line HTML file, which is a wonderful thing to look at and a challenging
-thing to expand upon. It is now 23 documented modules with an
+thing to expand upon. It is now 24 documented modules with an
 [AGENTS.md](AGENTS.md), a build system, and checks that catch the mistakes a
 rendered frame will not show you. Fork it, point an AI coding agent at it, and
 grow it into something of your own.
@@ -73,7 +73,7 @@ Clone the repo, open it in Claude Code, Cursor, or anything similar, and
 describe what you want. The agent will find [AGENTS.md](AGENTS.md) on its own
 and pick up:
 
-- **An architecture map** — what each of the 23 modules does and where the
+- **An architecture map** — what each of the 24 modules does and where the
   render pipeline's passes happen.
 - **The invariants that are not obvious from reading the code** — the scene
   contract, the fixed render-order ladder, the shared uniform block, and the
@@ -211,14 +211,15 @@ to *extend*: every change touches the same file, diffs are unreadable, and two
 people cannot work on it at once. Neither, in practice, can an agent work on it
 comfortably, because the file is larger than most tools want to read at once.
 
-So it is now **23 ES modules** in `src/modules/`, split along boundaries the
+So it is now **24 ES modules** in `src/modules/`, split along boundaries the
 original author had already marked with comment banners:
 
 ```
 config.js  palette.js  math.js  scene-contract.js  glsl.js
 terrain.js  sky.js  wind.js  grass.js  river.js  trees.js
 viaduct.js  railway.js  village.js  train.js  post.js
-walker.js  audio.js  corgi.js  materials.js  field.js  track-ref.js
+walker.js  audio.js  corgi.js  treats.js  materials.js  field.js
+track-ref.js
 main.js
 ```
 

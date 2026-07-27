@@ -19,6 +19,7 @@ import { PAINTED_FS, PAINTED_VS, SOLID_FS, SOLID_VS, STONE_FS, STONE_VS, buildPe
 import { buildMillWheel, buildVillage } from './village.js';
 import { BIRD_FS, MOTE_FS, Particles, SMOKE_FS, Train } from './train.js';
 import { buildCorgis } from './corgi.js';
+import { HEART_FS, Treats, buildTreatHand } from './treats.js';
 import { BLUR_FS, BRIGHT_FS, COMPOSITE_FS, DEPTH_FS, DOWN_FS, UP_FS } from './post.js';
 import { Walker } from './walker.js';
 import { Audio } from './audio.js';
@@ -106,7 +107,7 @@ const audio = new Audio();
 let walker, grass, train, smoke, motes, birdsP, cloudObj, skyMesh, waterMesh, terrainMesh;
 let trees=[], ridges=[], reflectSet=[];
 let millWheel=null, villageSmokers=[], proxyTerrain=null, puffRT=null;
-let corgis=null;
+let corgis=null, treats=null, hearts=null;
 let cloudShRT=null, cloudShMat=null, lifeGroup=null;
 
 /*──────── the whole build ────────*/
@@ -348,6 +349,12 @@ async function boot(){
   setDepth(corgis.group, DSM(PAINTED_VS(), U(), {side:THREE.DoubleSide}));
   scene.add(corgis.group);
 
+  // the biscuit you hold out (§17). A viewmodel 0.4 m from the eye: it casts
+  // no shadow, and the reflection pass drops it since it is not in reflectSet.
+  const handMesh = new THREE.Mesh(buildTreatHand(), paintedMat);
+  handMesh.frustumCulled = false; handMesh.renderOrder = 8; handMesh.visible = false;
+  addMesh(scene, handMesh, NO_CAST);
+
   /*── particles ──*/
   // one container, so the shadow and reflection passes skip all of them with a
   // single flag rather than a save-record per mesh per pass
@@ -356,6 +363,8 @@ async function boot(){
   smoke  = new Particles(lifeGroup, U(), 520,  SMOKE_FS(), 22, true);
   motes  = new Particles(lifeGroup, U(), 2400, MOTE_FS(),  24, false);
   birdsP = new Particles(lifeGroup, U(), 60,   BIRD_FS(),  21, false);
+  hearts = new Particles(lifeGroup, U(), 140,  HEART_FS(), 25, true);
+  treats = new Treats(handMesh, hearts);
   initMotes(); initBirds();
 
   train.onChuff = (wp, fwd, spd)=>{
@@ -426,7 +435,7 @@ async function boot(){
     b.classList.toggle('on', +b.dataset.q === State.q);
   State.running = true;
   window.__ready = true; window.__W = walker; window.__H = sampleHeight;
-  window.__corgis = corgis;
+  window.__corgis = corgis; window.__treats = treats;
   // pre-roll a few frames so the first visible frame is fully warmed
   for(let i=0;i<3;i++){ frame(performance.now()); }
   requestAnimationFrame(loop);
@@ -952,10 +961,14 @@ function frame(now){
   }
   if(millWheel) millWheel.rotation.z -= dt*0.55;
   if(corgis) corgis.update(dt, tAcc);
+  // after the corgis, so the lure it sets is acted on next frame, and the
+  // mouth it tests against is this frame's
+  if(treats){ treats.update(dt, tAcc, camera, corgis); treats.updateHearts(dt); }
 
   updateSmoke(dt); emitVillageSmoke(dt);
   updateMotes(dt, camera); updateBirds(dt, tAcc);
   smoke.commit(camera.position); motes.commit(camera.position); birdsP.commit(camera.position);
+  if(hearts) hearts.commit(camera.position);
 
   cloudSortT -= dt;
   if(cloudSortT <= 0){ cloudSortT = 0.4; sortClouds(); }
@@ -1079,8 +1092,11 @@ function hudTick(){
     const mk=(cls)=>{ const s=document.createElement('span'); s.className=cls; t.appendChild(s); return s; };
     teleNodes={ a:mk('k'), b:mk('v'), c:mk('k'), d:mk('v'), br:t.appendChild(document.createElement('br')),
                 e:mk('k'), f:mk('v'), g:mk('k'), h:mk('v') };
+    teleNodes.i = t.appendChild(document.createElement('br'));
+    teleNodes.j = mk('k'); teleNodes.k2 = mk('v');
     teleNodes.a.textContent='wind '; teleNodes.c.textContent='  gust ';
     teleNodes.e.textContent='train '; teleNodes.g.textContent='  fps ';
+    teleNodes.j.textContent='treats ';
   }
   const w = windAtJS(camera.position.x, camera.position.z, 10);
   const eta = Math.max(0, nextTrain - tAcc);
@@ -1088,6 +1104,7 @@ function hudTick(){
   teleNodes.d.textContent = (WindSys.meanSpeed*(1+w.gust*0.9)).toFixed(1);
   teleNodes.f.textContent = train.active ? 'crossing' : (eta<1?'—':eta.toFixed(0)+'s');
   teleNodes.h.textContent = State.fps.toFixed(0);
+  teleNodes.k2.textContent = treats ? String(treats.given) : '0';
 }
 let toastT=null;
 function toast(msg){
@@ -1115,6 +1132,8 @@ function bindInput(){
     if(e.code==='Space') e.preventDefault();
     if(e.code==='KeyT'){ train.start(); audio.whistle(0.18); nextTrain=tAcc+110;
       toast('train approaching'); }
+    if(e.code==='KeyG' && treats){
+      toast(treats.toggle() ? 'treat out — walk up to a corgi' : 'treat away'); }
     if(e.code==='Escape' && document.exitPointerLock) document.exitPointerLock();
   });
   addEventListener('keyup', e=>{ walker.keys[e.code]=false; });

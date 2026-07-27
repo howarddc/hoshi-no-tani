@@ -186,6 +186,14 @@ class Corgi {
     this.head.add(new THREE.Mesh(buildHead(K), mat));
     this.body.add(this.head);
 
+    /*  An empty at the muzzle, so "did the biscuit reach the dog's mouth" is
+        answered by the scene graph rather than by re-deriving the nose from
+        position, yaw, scale and whatever the head is doing this frame. It
+        follows the head when it dips to sniff, which is the whole point.    */
+    this.mouth = new THREE.Object3D();
+    this.mouth.position.set(0, 0.062, 0.205);
+    this.head.add(this.mouth);
+
     this.tail = new THREE.Group();
     this.tail.position.set(0, 0.045, -0.275);
     this.tail.add(new THREE.Mesh(buildTail(K), mat));
@@ -213,6 +221,11 @@ class Corgi {
     this.rest = 1.0 + r()*3.0;    // seconds until it next picks somewhere to go
     this.sniff = 0;
     this.perk  = r()*TAU;
+    // ── treats (§17) ──
+    this.lure = null;             // {x,z} to head for while a biscuit is out
+    this.fedCool = 0;             // refractory period after being fed
+    this.joy = 0;                 // seconds of visible delight remaining
+    this.beg = 0;                 // 0..1, sitting up for an offered treat
     this.pickTarget();
   }
 
@@ -235,21 +248,42 @@ class Corgi {
     this.target = new THREE.Vector2(this.home.x, this.home.z);
   }
 
+  /*  World position of the muzzle, for the treat test in §17.               */
+  mouthWorld(out){
+    this.mouth.updateWorldMatrix(true, false);
+    return out.setFromMatrixPosition(this.mouth.matrixWorld);
+  }
+
   update(dt, t){
     const r = this.r;
+    /*  A biscuit outranks whatever it was doing. It stops just short of you
+        rather than walking into your shins — 0.75 m is about where a dog
+        stops and looks up, and it keeps the muzzle inside REACH.            */
+    if(this.lure){
+      const lx = this.lure.x - this.pos.x, lz = this.lure.z - this.pos.y;
+      const ld = Math.hypot(lx, lz) || 1;
+      /*  The lure is already the spot §17 wants it to stand on — a point set
+          out in front of the player — so it walks onto it rather than
+          stopping short. Standing off by a further metre put it back at your
+          heels and out of frame, which was the whole problem.               */
+      this.target.set(this.lure.x, this.lure.z);
+      this.sniff = 0;
+      this.rest = 0.6;
+    }
     const toX = this.target.x - this.pos.x, toZ = this.target.y - this.pos.y;
     const dist = Math.hypot(toX, toZ);
 
-    if(dist < 0.9){
+    if(dist < 0.9 && !this.lure){
       // arrived — stand about, have a sniff, then choose somewhere else
       this.rest -= dt;
       if(this.sniff <= 0 && r() < dt*0.6) this.sniff = 0.8 + r()*1.6;
       if(this.rest <= 0){ this.pickTarget(); this.rest = 2.0 + r()*5.0; }
     }
 
-    const wantMove = dist >= 0.9 && this.sniff <= 0;
+    const wantMove = dist >= (this.lure ? 0.12 : 0.9) && this.sniff <= 0;
     // corgis do not build up speed so much as arrive at it
-    const tgtSpeed = wantMove ? (1.5 + (this.size-0.92)*1.4) : 0;
+    // — and they come rather faster when there is a biscuit involved
+    const tgtSpeed = wantMove ? (1.5 + (this.size-0.92)*1.4) * (this.lure ? 1.5 : 1) : 0;
     this.speed += (tgtSpeed - this.speed) * clamp(dt*3.2, 0, 1);
     this.sniff = Math.max(0, this.sniff - dt);
 
@@ -271,6 +305,18 @@ class Corgi {
     const g = this.gait;
     const moving = smoothstep(0.05, 0.8, this.speed);
 
+    /*  Begging. A corgi standing on all fours cannot reach a held-out hand,
+        so when one is close it rocks back and lifts its front end — which is
+        both what really happens and what closes the last half-metre between
+        the muzzle marker and the biscuit.                                   */
+    const begWant = (this.lure && dist < 1.9 && this.fedCool <= 0) ? 1 : 0;
+    this.beg += (begWant - this.beg) * clamp(dt*4.5, 0, 1);
+    const bg = this.beg;
+
+    // just been given a biscuit: bounces on the spot for a couple of seconds
+    const jy = smoothstep(0, 0.55, this.joy);
+
+
     // diagonal pairs, as a real trot: front-left with rear-right
     const swing = [0, Math.PI, Math.PI, 0];
     for(let i=0;i<4;i++){
@@ -278,27 +324,32 @@ class Corgi {
       const lift = Math.sin(ph);
       // the prance: the forward reach is bigger than the backward push, which
       // is what makes a trot look springy instead of like a pendulum
-      this.legs[i].rotation.x = (lift > 0 ? lift*0.85 : lift*0.55) * 0.62 * moving;
+      this.legs[i].rotation.x = (lift > 0 ? lift*0.85 : lift*0.55) * 0.62 * moving
+                              + (i < 2 ? bg*0.95 : 0);           // front paws tuck up
     }
 
     // body rises on each diagonal beat, and rolls very slightly into it
     const bob = Math.sin(g*2) * 0.016 * moving;
-    this.body.position.y = 0.205 + bob;
+    this.body.position.y = 0.205 + bob + jy * Math.abs(Math.sin(t*7.4 + this.perk)) * 0.050
+                        + bg*0.085;
     this.body.rotation.z = Math.sin(g) * 0.055 * moving;
-    this.body.rotation.x = -0.02 * moving;
+    this.body.rotation.x = -0.02 * moving - jy*0.10 - bg*0.42;   // rocks back
 
-    // head: bobs against the body, dips right down when sniffing
+    // head: bobs against the body, dips right down when sniffing, and comes
+    // up to look at you while it is pleased
     const sn = smoothstep(0, 0.35, this.sniff);
-    this.head.rotation.x = lerp(-Math.sin(g*2 + 0.7) * 0.05 * moving, 0.72, sn);
+    this.head.rotation.x = lerp(-Math.sin(g*2 + 0.7) * 0.05 * moving, 0.72, sn)
+                         - jy*0.34 - bg*0.30;                    // nose up
     this.head.rotation.y = Math.sin(t*0.7 + this.perk) * 0.12 * (1 - moving*0.6);
-    this.head.position.y = 0.052 - sn*0.045;
+    this.head.position.y = 0.052 - sn*0.045 + jy*0.010;
 
-    /*  The tail never stops.  It is faster when the dog is moving and faster
-        again when its nose is down, which is the single cheapest thing you can
-        do to make an animal look pleased with itself.                        */
-    const wagRate = 9.0 + moving*7.0 + sn*6.0;
-    this.tail.rotation.y = Math.sin(t*wagRate + this.perk) * (0.42 + moving*0.22);
-    this.tail.rotation.x = -0.35 - moving*0.22;
+    /*  The tail never stops.  It is faster when the dog is moving, faster again
+        when its nose is down, and fastest of all just after a biscuit — which
+        is the single cheapest thing you can do to make an animal look pleased
+        with itself.                                                          */
+    const wagRate = 9.0 + moving*7.0 + sn*6.0 + jy*11.0;
+    this.tail.rotation.y = Math.sin(t*wagRate + this.perk) * (0.42 + moving*0.22 + jy*0.30);
+    this.tail.rotation.x = -0.35 - moving*0.22 - jy*0.20;
 
     // ── set down on the ground, following the slope ──
     const gy = sampleHeight(this.pos.x, this.pos.y);
