@@ -307,7 +307,7 @@ def build() -> str:
         "     Original work copyright (c) 2026 Lentils\n"
         "         https://codepen.io/lentils801\n"
         "     Modifications and additions copyright (c) 2026 Rob Howard\n"
-        "         https://github.com/howarddc/claude-opus-5-ghibli\n"
+        "         https://github.com/howarddc/hoshi-no-tani\n"
         "\n"
         "     Released under the MIT License. Permission is hereby granted, free\n"
         "     of charge, to any person obtaining a copy of this software and\n"
