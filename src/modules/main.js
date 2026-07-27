@@ -86,8 +86,11 @@ const postMat = (fs, uni)=> new THREE.RawShaderMaterial({
 /*──────── state ────────*/
 const QS = new URLSearchParams(location.search);
 const State = {
-  q: QS.has('q') ? clamp(+QS.get('q'),0,3) : 2,
-  density: QS.has('d') ? +QS.get('d') : 1.0,
+  // Defaults are deliberately conservative: the valley opens on Low with a
+  // thin sward so it comes up quickly and runs on modest hardware. Raise with
+  // the 1-4 keys, the settings panel (H), or ?q= and ?d=.
+  q: QS.has('q') ? clamp(+QS.get('q'),0,3) : 0,
+  density: QS.has('d') ? +QS.get('d') : 0.20,
   scale:   QS.has('s') ? +QS.get('s') : 1.0,
   exposure:1.0, bloom:1.0, paint:1.0,
   autoQ: !QS.has('q'),
@@ -359,6 +362,9 @@ async function boot(){
   /*── grass ──*/
   setStat('sowing a million blades', 0.88); await idle();
   grass = new GrassField(scene, G, QUALITY[State.q]);
+  // seed the field's density before the first build, or it builds a full-
+  // density sward and then throws it away when bindInput syncs the slider
+  grass.density = State.density;
   grass.build(QUALITY[State.q]);
 
   /*── camera / rig ──*/
@@ -1117,7 +1123,9 @@ function bindInput(){
   // rebuilding the field is a ~200 ms hitch; never do it per slider tick
   let densT=null;
   bind('qDens', v=>{ State.density=v/100;
-    if(grass && grass.built){ clearTimeout(densT);
+    // bind() fires once at startup to sync the readout, so guard on an actual
+    // change — otherwise every load pays a rebuild to arrive where it already is
+    if(grass && grass.built && grass.density !== State.density){ clearTimeout(densT);
       densT = setTimeout(()=>{ grass.density=State.density; rebuildGrass(); }, 280); } });
   let scaleT=null;
   bind('qScale', v=>{ State.scale=v/100;
