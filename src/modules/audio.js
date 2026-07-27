@@ -232,6 +232,40 @@ export class Audio {
     const sd=ctx.createGain(); sd.gain.value=0.35; g.connect(sd); sd.connect(this.conv);
     s.start(t); s.stop(t+0.24);
   }
+  /*  A biscuit being eaten (§17).  Two or three short noise grains about 50 ms
+      apart, band-limited to the dry snap of something brittle and swept down
+      as each bite dulls.
+
+      Deliberately built from footstep()'s parts rather than as a new voice: it
+      is the same shape of sound — a filtered burst of the shared nWhite buffer
+      with a fast decay — so it needs no new buffer and no new bus, and it
+      lands in the same reverb as everything else in the valley.
+
+      No distance or pan term, unlike chuff(): a treat is always taken about
+      1.8 m in front of your face, so there is nothing to attenuate. The
+      randomised loopStart and playbackRate do the work of stopping twenty
+      feeds in a row from sounding like one sample on repeat.                */
+  crunch(level){
+    if(!this.ok) return;
+    const ctx=this.ctx; let t=ctx.currentTime;
+    const n = 2 + (Math.random()*2|0);
+    for(let i=0;i<n;i++){
+      const s=ctx.createBufferSource(); s.buffer=this.nWhite; s.loop=true;
+      s.loopStart=Math.random()*5;
+      s.playbackRate.value=0.85+Math.random()*0.7;
+      const bq=ctx.createBiquadFilter(); bq.type='bandpass'; bq.Q.value=1.1;
+      bq.frequency.setValueAtTime(1500+Math.random()*900, t);
+      bq.frequency.exponentialRampToValueAtTime(600, t+0.09);
+      const g=ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime((level||0.05)*(1 - i*0.22), t+0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, t+0.10);
+      s.connect(bq); bq.connect(g); g.connect(this.master);
+      const sd=ctx.createGain(); sd.gain.value=0.25; g.connect(sd); sd.connect(this.conv);
+      s.start(t); s.stop(t+0.14);
+      t += 0.05 + Math.random()*0.045;
+    }
+  }
   bird(){
     if(!this.ok) return;
     const ctx=this.ctx, t=ctx.currentTime;

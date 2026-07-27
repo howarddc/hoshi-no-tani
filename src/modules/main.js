@@ -365,6 +365,14 @@ async function boot(){
   birdsP = new Particles(lifeGroup, U(), 60,   BIRD_FS(),  21, false);
   hearts = new Particles(lifeGroup, U(), 140,  HEART_FS(), 25, true);
   treats = new Treats(handMesh, hearts);
+  // the hand stows itself on a feed, so say why — otherwise the biscuit just
+  // vanishes and it reads as a bug rather than as the rule
+  /*  0.16 is calibrated against footstep(), not chosen by ear — measured on
+      an analyser tap, 0.055 came out ~2.5x quieter than a footstep and the
+      bandpass eats most of the nominal level. A footstep is a known-audible
+      part of the mix, so matching it is the right anchor for a sound you
+      deliberately caused.                                                 */
+  treats.onFeed = ()=>{ audio.crunch(0.16); toast('taken — press G for another'); };
   initMotes(); initBirds();
 
   train.onChuff = (wp, fwd, spd)=>{
@@ -435,7 +443,7 @@ async function boot(){
     b.classList.toggle('on', +b.dataset.q === State.q);
   State.running = true;
   window.__ready = true; window.__W = walker; window.__H = sampleHeight;
-  window.__corgis = corgis; window.__treats = treats;
+  window.__corgis = corgis; window.__treats = treats; window.__audio = audio;
   // pre-roll a few frames so the first visible frame is fully warmed
   for(let i=0;i<3;i++){ frame(performance.now()); }
   requestAnimationFrame(loop);

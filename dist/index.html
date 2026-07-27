@@ -223,6 +223,8 @@ window.addEventListener('error', e=>{
           trotting, and sit up to beg for it.</li>
         <li>Let one reach the biscuit and it eats, <b>hearts</b> float up, and
           your <b>treats</b> tally rises in the corner.</li>
+        <li>One biscuit at a time — your hand goes away once a corgi takes it,
+          so press <b>G</b> again for the next.</li>
       </ol>
     </div>
     <div id="bar"><div id="barIn"></div></div>
@@ -4994,6 +4996,10 @@ class Treats {
     this.raise = 0;           // 0 stowed, 1 fully out
     this.give = 0;            // countdown of the little "here you go" push
     this.bob = 0;
+    /*  Set by the caller, as train.onChuff and walker.onFootstep are. Keeping
+        it a callback is what stops this module needing to know the audio
+        engine exists.                                                       */
+    this.onFeed = null;
   }
 
   toggle(){ this.out = !this.out; return this.out; }
@@ -5070,13 +5076,22 @@ class Treats {
       d.mouthWorld(_mouth);
       if(_mouth.distanceTo(_hand) > REACH) continue;
 
-      // ── eaten ──
+      /*  ── eaten ──
+          One biscuit at a time: the hand goes away and you press G again for
+          the next. That is what makes each treat a decision rather than a
+          hosepipe — walk in holding it out and you would otherwise feed the
+          whole pack in three seconds without choosing anything.
+          `out = false` also clears every lure on the next pass, so the pack
+          disperses and has to be called back in.                            */
       this.given++;
       d.fedCool = COOL;
       d.joy = 2.2;
       d.lure = null;
       this.give = 1.0;
+      this.out = false;
       this.burst(_mouth);
+      if(this.onFeed) this.onFeed(_mouth);
+      break;                    // exactly one dog gets it; the rest missed out
     }
   }
 
@@ -5698,6 +5713,40 @@ class Audio {
     const sd=ctx.createGain(); sd.gain.value=0.35; g.connect(sd); sd.connect(this.conv);
     s.start(t); s.stop(t+0.24);
   }
+  /*  A biscuit being eaten (§17).  Two or three short noise grains about 50 ms
+      apart, band-limited to the dry snap of something brittle and swept down
+      as each bite dulls.
+
+      Deliberately built from footstep()'s parts rather than as a new voice: it
+      is the same shape of sound — a filtered burst of the shared nWhite buffer
+      with a fast decay — so it needs no new buffer and no new bus, and it
+      lands in the same reverb as everything else in the valley.
+
+      No distance or pan term, unlike chuff(): a treat is always taken about
+      1.8 m in front of your face, so there is nothing to attenuate. The
+      randomised loopStart and playbackRate do the work of stopping twenty
+      feeds in a row from sounding like one sample on repeat.                */
+  crunch(level){
+    if(!this.ok) return;
+    const ctx=this.ctx; let t=ctx.currentTime;
+    const n = 2 + (Math.random()*2|0);
+    for(let i=0;i<n;i++){
+      const s=ctx.createBufferSource(); s.buffer=this.nWhite; s.loop=true;
+      s.loopStart=Math.random()*5;
+      s.playbackRate.value=0.85+Math.random()*0.7;
+      const bq=ctx.createBiquadFilter(); bq.type='bandpass'; bq.Q.value=1.1;
+      bq.frequency.setValueAtTime(1500+Math.random()*900, t);
+      bq.frequency.exponentialRampToValueAtTime(600, t+0.09);
+      const g=ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime((level||0.05)*(1 - i*0.22), t+0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, t+0.10);
+      s.connect(bq); bq.connect(g); g.connect(this.master);
+      const sd=ctx.createGain(); sd.gain.value=0.25; g.connect(sd); sd.connect(this.conv);
+      s.start(t); s.stop(t+0.14);
+      t += 0.05 + Math.random()*0.045;
+    }
+  }
   bird(){
     if(!this.ok) return;
     const ctx=this.ctx, t=ctx.currentTime;
@@ -6163,6 +6212,14 @@ async function boot(){
   birdsP = new Particles(lifeGroup, U(), 60,   BIRD_FS(),  21, false);
   hearts = new Particles(lifeGroup, U(), 140,  HEART_FS(), 25, true);
   treats = new Treats(handMesh, hearts);
+  // the hand stows itself on a feed, so say why — otherwise the biscuit just
+  // vanishes and it reads as a bug rather than as the rule
+  /*  0.16 is calibrated against footstep(), not chosen by ear — measured on
+      an analyser tap, 0.055 came out ~2.5x quieter than a footstep and the
+      bandpass eats most of the nominal level. A footstep is a known-audible
+      part of the mix, so matching it is the right anchor for a sound you
+      deliberately caused.                                                 */
+  treats.onFeed = ()=>{ audio.crunch(0.16); toast('taken — press G for another'); };
   initMotes(); initBirds();
 
   train.onChuff = (wp, fwd, spd)=>{
@@ -6233,7 +6290,7 @@ async function boot(){
     b.classList.toggle('on', +b.dataset.q === State.q);
   State.running = true;
   window.__ready = true; window.__W = walker; window.__H = sampleHeight;
-  window.__corgis = corgis; window.__treats = treats;
+  window.__corgis = corgis; window.__treats = treats; window.__audio = audio;
   // pre-roll a few frames so the first visible frame is fully warmed
   for(let i=0;i<3;i++){ frame(performance.now()); }
   requestAnimationFrame(loop);

@@ -116,6 +116,10 @@ export class Treats {
     this.raise = 0;           // 0 stowed, 1 fully out
     this.give = 0;            // countdown of the little "here you go" push
     this.bob = 0;
+    /*  Set by the caller, as train.onChuff and walker.onFootstep are. Keeping
+        it a callback is what stops this module needing to know the audio
+        engine exists.                                                       */
+    this.onFeed = null;
   }
 
   toggle(){ this.out = !this.out; return this.out; }
@@ -192,13 +196,22 @@ export class Treats {
       d.mouthWorld(_mouth);
       if(_mouth.distanceTo(_hand) > REACH) continue;
 
-      // ── eaten ──
+      /*  ── eaten ──
+          One biscuit at a time: the hand goes away and you press G again for
+          the next. That is what makes each treat a decision rather than a
+          hosepipe — walk in holding it out and you would otherwise feed the
+          whole pack in three seconds without choosing anything.
+          `out = false` also clears every lure on the next pass, so the pack
+          disperses and has to be called back in.                            */
       this.given++;
       d.fedCool = COOL;
       d.joy = 2.2;
       d.lure = null;
       this.give = 1.0;
+      this.out = false;
       this.burst(_mouth);
+      if(this.onFeed) this.onFeed(_mouth);
+      break;                    // exactly one dog gets it; the rest missed out
     }
   }
 
