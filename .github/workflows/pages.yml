@@ -1,11 +1,25 @@
 name: pages
 
-# Publishes dist/ to GitHub Pages, so the valley is playable in a browser
+# Publishes the demo to GitHub Pages, so the valley is playable in a browser
 # straight from the repo with nothing to clone, install or build.
 #
-# Only dist/ is uploaded, not the whole repository, so the demo lands on the
-# site root — https://howarddc.github.io/hoshi-no-tani/ — rather than at a
-# /dist/ subpath.
+#   /        <- main
+#   /corgi/  <- the corgi-paradise branch, kept as a worked example of
+#               extending this codebase rather than merged into it
+#
+# WHY BOTH ARE BUILT IN ONE JOB
+# Pages serves exactly one site per repository, and every deploy REPLACES it
+# wholesale. Two workflows deploying independently would therefore take turns
+# deleting each other. So this job checks out both branches by name, builds
+# each with its own tools/build.py, and assembles a single artefact with the
+# showcase in a sub-directory.
+#
+# Both branches are checked out by explicit ref, never by "whatever triggered
+# this run" — a push to corgi-paradise runs corgi-paradise's copy of this file,
+# and a bare checkout there would put the corgi build at the site root.
+#
+# Both branches must carry this file, or pushes to the showcase branch will not
+# trigger a deploy. Keep them identical.
 #
 # ONE-TIME SETUP: in the repository's Settings -> Pages, set Source to
 # "GitHub Actions". Until that is done this workflow will run and then fail at
@@ -13,7 +27,7 @@ name: pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, corgi-paradise]
   workflow_dispatch:
 
 permissions:
@@ -21,10 +35,15 @@ permissions:
   pages: write
   id-token: write
 
-# Let a running deploy finish rather than cancelling it half-published.
+# Let a running deploy finish rather than cancelling it half-published. Two
+# branches share this group on purpose: pushes to both queue instead of racing.
 concurrency:
   group: pages
   cancel-in-progress: false
+
+env:
+  SHOWCASE_BRANCH: corgi-paradise
+  SHOWCASE_PATH: corgi
 
 jobs:
   deploy:
@@ -33,23 +52,44 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Check out the showcase branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHOWCASE_BRANCH }}
+          path: .showcase
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
-      # Publishing a dist/ that no longer matches src/ would put a stale build
-      # in front of every visitor, so this gate runs before anything is
-      # uploaded rather than trusting the separate CI workflow to have caught it.
-      - name: dist/ in sync, imports resolve, no cycles
+      # Each --check covers three failure modes that a rendered frame will not
+      # show you: dist/ out of sync with src/, an imported name the target
+      # module does not export, and an import cycle. Run before assembling, so
+      # a stale build fails the deploy instead of reaching visitors.
+      - name: main is in sync
         run: python3 tools/build.py --check
+
+      - name: showcase is in sync
+        run: python3 .showcase/tools/build.py --check
+
+      - name: Assemble the site
+        run: |
+          set -euo pipefail
+          mkdir -p "site/${SHOWCASE_PATH}"
+          cp dist/index.html "site/index.html"
+          cp .showcase/dist/index.html "site/${SHOWCASE_PATH}/index.html"
+          echo "--- site ---" && find site -type f -printf '%p  %s bytes\n'
 
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: site
 
       - id: deployment
         uses: actions/deploy-pages@v4
