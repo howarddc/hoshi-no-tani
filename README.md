@@ -105,6 +105,30 @@ That last one is the most interesting, and *Move the sun* below explains why.
 stale. CI enforces it, and AGENTS.md says so, but it is the single easiest
 thing to forget.
 
+### A worked example: 🐕 [the corgi edition](https://howarddc.github.io/hoshi-no-tani/corgi/)
+
+If you would rather see what "extend it" looks like before doing it yourself,
+the [`corgi-paradise`](https://github.com/howarddc/hoshi-no-tani/tree/corgi-paradise)
+branch adds a pack of Pembroke Welsh corgis to the meadow — four coat colours,
+a real trot, and a biscuit you can hold out with **G** to call them over and
+feed them, with hearts and a score.
+
+**[▶ Play the corgi edition](https://howarddc.github.io/hoshi-no-tani/corgi/)**
+
+It is deliberately *not* merged. It stays a branch so you can diff it against
+`main` and see exactly what a feature costs here — two new modules, a handful
+of palette entries, and about a dozen lines of wiring in `main.js`:
+
+```bash
+git diff main corgi-paradise --stat
+```
+
+The commit messages are the interesting part. They record what went wrong as
+well as what shipped: six corgis that were completely invisible because the
+meadow is taller than they are, a treat that could not be reached because a
+standing adult's hand is a metre above a corgi's nose, and dogs that trotted up
+and then stood politely behind the camera where nobody could see them.
+
 ### By hand
 
 Serve the `src/` folder and your changes appear on reload with no build step:
