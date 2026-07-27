@@ -3970,10 +3970,24 @@ function collideWalk(x, z, curY, radius){
       z = s.z + lx*s.sa + lz*s.ca;
     }
   }
+  /*  The parapet, as a wall you cannot walk through.
+      `sd` is the distance sideways from the deck's centreline, and the upper
+      bound on it is load-bearing: without it this test reads "anywhere beyond
+      the parapet", which is most of the valley, and the clamp below then
+      TELEPORTS you onto the bridge from wherever you were standing. It needs
+      only two coincidences — being within the deck's span along the bridge
+      axis, and standing on ground within 3 m of deck height — and the meadow
+      north of the spawn knoll satisfies both. Walking that way used to fling
+      you 136 m sideways onto the viaduct.
+      Half a deck-width of margin is far more than a walker can cross in one
+      frame (0.13 m at a run, 0.39 m at the 0.05 s dt cap), so nobody steps
+      through the parapet, and nobody standing in a field is claimed by it.  */
   const dx0 = x - BRIDGE.x, dz0 = z - BRIDGE.z;
   const al = dx0*BR.ax[0] + dz0*BR.ax[1];
   let   sd = dx0*BR.pp[0] + dz0*BR.pp[1];
-  if(Math.abs(al) <= BR_L + 1.5 && Math.abs(sd) > BR_HW && Math.abs(curY - BR.deck) < 3.0){
+  const SD_MAX = BR.width*0.5 + 2.0;
+  if(Math.abs(al) <= BR_L + 1.5 && Math.abs(sd) > BR_HW && Math.abs(sd) <= SD_MAX
+     && Math.abs(curY - BR.deck) < 3.0){
     sd = sd < 0 ? -BR_HW : BR_HW;
     x = BRIDGE.x + BR.ax[0]*al + BR.pp[0]*sd;
     z = BRIDGE.z + BR.ax[1]*al + BR.pp[1]*sd;
