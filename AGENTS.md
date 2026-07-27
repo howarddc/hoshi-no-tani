@@ -18,7 +18,9 @@ There is no build step, no bundler, no test suite, and no framework.
 ### Three hard rules
 
 **1. This is a fork with two copyright holders. Do not touch either notice.**
-The valley itself was written by **Lentils** (codepen.io/lentils801); the work
+The valley itself was created by **Lentils** (codepen.io/lentils801, [@Lentils80
+on X](https://x.com/Lentils80/status/2081136109778538917), who built it with
+Claude Opus 5 — hence the original repo name); the work
 of modularising it, the build system, the scene contract, the docs and CI is by
 **Rob Howard**. Both are MIT, and `LICENSE.txt` carries both notices plus a
 provenance breakdown. MIT requires those notices survive verbatim in all copies
