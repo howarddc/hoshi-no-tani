@@ -114,6 +114,13 @@ Two environment traps have cost real time before:
   that nothing is left holding the scene, and do it *before* writing your
   summary so it is not skipped if the turn ends early.
 
+**`dist/` is deployed, not just committed.** `.github/workflows/pages.yml`
+publishes it to GitHub Pages on every push to `main`, so it is live at
+<https://howarddc.github.io/hoshi-no-tani/>. A stale or broken `dist/` is
+therefore visible to every visitor, not merely wrong in the repo — which is why
+both workflows gate on `tools/build.py --check`. Always rebuild after touching
+anything in `src/`.
+
 Node is not installed on the owner's machine (`node`/`npx` absent), so there is
 no offline syntax check. **A full boot to READY in a browser is the
 parse-and-execute check.** The `#err` overlay catches both `window.onerror` and

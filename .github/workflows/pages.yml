@@ -1,0 +1,55 @@
+name: pages
+
+# Publishes dist/ to GitHub Pages, so the valley is playable in a browser
+# straight from the repo with nothing to clone, install or build.
+#
+# Only dist/ is uploaded, not the whole repository, so the demo lands on the
+# site root — https://howarddc.github.io/hoshi-no-tani/ — rather than at a
+# /dist/ subpath.
+#
+# ONE-TIME SETUP: in the repository's Settings -> Pages, set Source to
+# "GitHub Actions". Until that is done this workflow will run and then fail at
+# the deploy step, because no Pages site exists to deploy into.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it half-published.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # Publishing a dist/ that no longer matches src/ would put a stale build
+      # in front of every visitor, so this gate runs before anything is
+      # uploaded rather than trusting the separate CI workflow to have caught it.
+      - name: dist/ in sync, imports resolve, no cycles
+        run: python3 tools/build.py --check
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
