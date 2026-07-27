@@ -8,8 +8,8 @@ every stone in the viaduct, every cloud, and every note of the soundtrack is
 anywhere in this repository.
 
 **This repo exists to be taken apart.** The demo arrived as a single
-6,184-line HTML file, which is a wonderful thing to look at and a miserable
-thing to change. It is now 22 documented modules with an
+6,184-line HTML file, which is a wonderful thing to look at and a challenging
+thing to expand upon. It is now 22 documented modules with an
 [AGENTS.md](AGENTS.md), a build system, and checks that catch the mistakes a
 rendered frame will not show you. Fork it, point an AI coding agent at it, and
 grow it into something of your own.
